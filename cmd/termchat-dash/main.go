@@ -127,13 +127,13 @@ func initialModel() model {
 		relayURL:    "wss://termchat-o51d.onrender.com/ws",
 		latestTag:   "v1.8.0",
 		commitHash:  "main",
-		ghStatus:    "Syncing release telemetry...",
+		ghStatus:    "Syncing telemetry...",
 		platforms:   defaultPlatforms,
 		logFilter:   "ALL",
 		lastUpdated: time.Now(),
 		logs: []string{
-			fmt.Sprintf("%s [SYS] Dashboard telemetry engine connected", time.Now().Format("15:04:05")),
-			fmt.Sprintf("%s [NET] Authenticated GitHub CLI telemetry active", time.Now().Format("15:04:05")),
+			fmt.Sprintf("%s [SYS] Dashboard engine initialized", time.Now().Format("15:04:05")),
+			fmt.Sprintf("%s [NET] Explicit repository target: BrianC0des/termchat", time.Now().Format("15:04:05")),
 		},
 	}
 }
@@ -164,8 +164,8 @@ type ghReleaseJSON struct {
 
 func fetchReleaseDataCmd() tea.Cmd {
 	return func() tea.Msg {
-		rawCI := "CI Workflow: Published"
-		if out, err := exec.Command("gh", "run", "list", "--limit", "1").CombinedOutput(); err == nil && len(out) > 0 {
+		rawCI := "CI Pipeline: Released"
+		if out, err := exec.Command("gh", "run", "list", "-R", "BrianC0des/termchat", "--limit", "1").CombinedOutput(); err == nil && len(out) > 0 {
 			lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 			if len(lines) > 1 {
 				rawCI = lines[1]
@@ -186,8 +186,8 @@ func fetchReleaseDataCmd() tea.Cmd {
 		totalDownloads := 0
 		stars := 0
 
-		// 1. Try authenticated gh release view v1.8.0 --json assets,tagName
-		ghOut, ghErr := exec.Command("gh", "release", "view", "v1.8.0", "--json", "assets,tagName").CombinedOutput()
+		// Query GitHub CLI with explicit repository parameter (-R BrianC0des/termchat)
+		ghOut, ghErr := exec.Command("gh", "release", "view", "-R", "BrianC0des/termchat", "--json", "assets,tagName").CombinedOutput()
 		if ghErr == nil && len(ghOut) > 0 {
 			var rel ghReleaseJSON
 			if json.Unmarshal(ghOut, &rel) == nil {
@@ -204,7 +204,7 @@ func fetchReleaseDataCmd() tea.Cmd {
 				}
 			}
 		} else {
-			// Fallback HTTP API
+			// Fallback: Query GitHub API directly
 			req, _ := http.NewRequest("GET", "https://api.github.com/repos/BrianC0des/termchat/releases/latest", nil)
 			req.Header.Set("User-Agent", "TermChat-Dashboard/1.8")
 			client := &http.Client{Timeout: 5 * time.Second}
@@ -259,8 +259,20 @@ func fetchReleaseDataCmd() tea.Cmd {
 						platforms[i].Sha256 = sha
 					}
 				} else {
-					platforms[i].Status = "BUILDING"
-					platforms[i].SizeMB = 0
+					// Fallback to uncompressed binary if asset is uploaded as raw executable
+					rawAsset := strings.TrimSuffix(p.Asset, ".tar.zst")
+					rawAsset = strings.TrimSuffix(rawAsset, ".zip")
+					if sz, ok := assetSizeMap[rawAsset]; ok && sz > 100000 {
+						platforms[i].Status = "READY"
+						platforms[i].SizeMB = float64(sz) / (1024 * 1024)
+						platforms[i].Downloads = assetDlMap[rawAsset]
+						if sha, sOk := assetShaMap[rawAsset]; sOk {
+							platforms[i].Sha256 = sha
+						}
+					} else {
+						platforms[i].Status = "BUILDING"
+						platforms[i].SizeMB = 0
+					}
 				}
 			}
 			if platforms[i].Sha256 == "" {
