@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,7 +19,7 @@ import (
 	"time"
 )
 
-const AppVersion = "v1.5.0"
+const AppVersion = "v1.5.1"
 
 type progressWriter struct {
 	total      int64
@@ -164,7 +165,7 @@ func getStagedTagPath() string {
 	return filepath.Join(os.TempDir(), "termchat-staged-tag.txt")
 }
 
-func createOptimizedHTTPClient() *http.Client {
+func createOptimizedHTTPClient(insecure bool) *http.Client {
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
@@ -177,6 +178,9 @@ func createOptimizedHTTPClient() *http.Client {
 		TLSHandshakeTimeout: 5 * time.Second,
 		ReadBufferSize:      64 * 1024,
 		WriteBufferSize:     64 * 1024,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: insecure,
+		},
 	}
 	return &http.Client{Transport: transport, Timeout: 0}
 }
@@ -305,22 +309,30 @@ func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", binaryName),
 		}
 
-		client := createOptimizedHTTPClient()
+		clients := []*http.Client{
+			createOptimizedHTTPClient(false),
+			createOptimizedHTTPClient(true),
+		}
 		var resp *http.Response
 
-		for _, u := range urls {
-			req, rErr := http.NewRequest("GET", u, nil)
-			if rErr != nil {
-				continue
+		for _, client := range clients {
+			for _, u := range urls {
+				req, rErr := http.NewRequest("GET", u, nil)
+				if rErr != nil {
+					continue
+				}
+				req.Header.Set("User-Agent", "TermChat-Updater/1.5")
+				r, dErr := client.Do(req)
+				if dErr == nil && r.StatusCode == http.StatusOK {
+					resp = r
+					break
+				}
+				if r != nil {
+					r.Body.Close()
+				}
 			}
-			req.Header.Set("User-Agent", "TermChat-Updater/1.4")
-			r, dErr := client.Do(req)
-			if dErr == nil && r.StatusCode == http.StatusOK {
-				resp = r
+			if resp != nil {
 				break
-			}
-			if r != nil {
-				r.Body.Close()
 			}
 		}
 
@@ -419,22 +431,34 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", binaryName),
 	}
 
-	client := createOptimizedHTTPClient()
+	clients := []*http.Client{
+		createOptimizedHTTPClient(false),
+		createOptimizedHTTPClient(true),
+	}
 	var resp *http.Response
+	var activeClient *http.Client
+	var targetURL string
 
-	for _, u := range urls {
-		req, rErr := http.NewRequest("GET", u, nil)
-		if rErr != nil {
-			continue
+	for _, client := range clients {
+		for _, u := range urls {
+			req, rErr := http.NewRequest("GET", u, nil)
+			if rErr != nil {
+				continue
+			}
+			req.Header.Set("User-Agent", "TermChat-Updater/1.5")
+			r, dErr := client.Do(req)
+			if dErr == nil && r.StatusCode == http.StatusOK {
+				resp = r
+				activeClient = client
+				targetURL = u
+				break
+			}
+			if r != nil {
+				r.Body.Close()
+			}
 		}
-		req.Header.Set("User-Agent", "TermChat-Updater/1.4")
-		r, dErr := client.Do(req)
-		if dErr == nil && r.StatusCode == http.StatusOK {
-			resp = r
+		if resp != nil {
 			break
-		}
-		if r != nil {
-			r.Body.Close()
 		}
 	}
 
@@ -452,15 +476,29 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 		}
 	}
 
-	var downloadedData bytes.Buffer
+	var rawBytes []byte
 	pw := &progressWriter{
 		total:      totalSize,
 		onProgress: onProgress,
 	}
-	destWriter := io.MultiWriter(&downloadedData, pw)
-	_, err = io.Copy(destWriter, resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("error reading download stream: %w", err)
+
+	if totalSize > 500000 {
+		resp.Body.Close()
+		multiBytes, mErr := downloadMultiThreaded(activeClient, targetURL, totalSize, pw)
+		if mErr == nil && len(multiBytes) > 100000 {
+			rawBytes = multiBytes
+		}
+	}
+
+	if len(rawBytes) == 0 {
+		var downloadedData bytes.Buffer
+		destWriter := io.MultiWriter(&downloadedData, pw)
+		_, err = io.Copy(destWriter, resp.Body)
+		_ = resp.Body.Close()
+		if err != nil {
+			return "", fmt.Errorf("error reading download stream: %w", err)
+		}
+		rawBytes = downloadedData.Bytes()
 	}
 
 	tmpFile, err := os.CreateTemp(filepath.Dir(execPath), "termchat-update-*")
@@ -475,7 +513,6 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 		_ = os.Remove(tmpPath)
 	}()
 
-	rawBytes := downloadedData.Bytes()
 	err = processAndWriteBinary(rawBytes, tmpFile)
 	_ = tmpFile.Close()
 
