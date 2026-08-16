@@ -19,7 +19,20 @@ import (
 	"time"
 )
 
-const AppVersion = "v1.7.1"
+const AppVersion = "v1.7.2"
+
+var (
+	preFetchMu       sync.RWMutex
+	isPreFetching    bool
+	preFetchTag      string
+	preFetchProgress int
+)
+
+func GetPreFetchStatus() (bool, string, int) {
+	preFetchMu.RLock()
+	defer preFetchMu.RUnlock()
+	return isPreFetching, preFetchTag, preFetchProgress
+}
 
 type progressWriter struct {
 	total      int64
@@ -344,6 +357,18 @@ func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 			}
 		}
 
+		preFetchMu.Lock()
+		isPreFetching = true
+		preFetchTag = latestTag
+		preFetchProgress = 0
+		preFetchMu.Unlock()
+
+		defer func() {
+			preFetchMu.Lock()
+			isPreFetching = false
+			preFetchMu.Unlock()
+		}()
+
 		binaryName := getPlatformBinaryName()
 		ext := ".tar.gz"
 		if runtime.GOOS == "windows" {
@@ -443,6 +468,19 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	execPath, err = filepath.EvalSymlinks(execPath)
 	if err != nil {
 		return "", fmt.Errorf("could not resolve symlinks: %w", err)
+	}
+
+	// Check if background pre-download is currently in progress
+	if active, tag, _ := GetPreFetchStatus(); active {
+		if onProgress != nil {
+			onProgress(fmt.Sprintf("[NET] Background pre-download for %s is currently in progress... Waiting for completion...", tag))
+		}
+		for i := 0; i < 30; i++ {
+			time.Sleep(500 * time.Millisecond)
+			if stillActive, _, _ := GetPreFetchStatus(); !stillActive {
+				break
+			}
+		}
 	}
 
 	// Check if update is ALREADY pre-fetched in background
