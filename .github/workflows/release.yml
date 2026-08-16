@@ -1,0 +1,71 @@
+name: Release TermChat
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Release Cross-Platform Binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build & Compress All Binaries
+        run: |
+          mkdir -p dist
+          
+          # Linux
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dist/termchat-linux-amd64 .
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o dist/termchat-linux-arm64 .
+          
+          # Windows
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o dist/termchat-windows.exe .
+          CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -ldflags="-s -w" -o dist/termchat-windows-arm64.exe .
+          
+          # macOS
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o dist/termchat-mac-apple-silicon .
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o dist/termchat-mac-intel .
+          
+          # Android / Termux
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -ldflags="-s -w" -o dist/termchat-android-arm64 .
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm go build -ldflags="-s -w" -o dist/termchat-android-arm .
+
+          # Create compressed archives (.tar.gz / .zip) & SHA256 checksums
+          cd dist
+          tar -czvf termchat-linux-amd64.tar.gz termchat-linux-amd64
+          tar -czvf termchat-linux-arm64.tar.gz termchat-linux-arm64
+          tar -czvf termchat-mac-apple-silicon.tar.gz termchat-mac-apple-silicon
+          tar -czvf termchat-mac-intel.tar.gz termchat-mac-intel
+          tar -czvf termchat-android-arm64.tar.gz termchat-android-arm64
+          tar -czvf termchat-android-arm.tar.gz termchat-android-arm
+          zip termchat-windows.zip termchat-windows.exe
+          zip termchat-windows-arm64.zip termchat-windows-arm64.exe
+          sha256sum * > checksums.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+            dist/termchat-linux-amd64
+            dist/termchat-linux-arm64
+            dist/termchat-windows.exe
+            dist/termchat-windows-arm64.exe
+            dist/termchat-mac-apple-silicon
+            dist/termchat-mac-intel
+            dist/termchat-android-arm64
+            dist/termchat-android-arm
+          generate_release_notes: true
