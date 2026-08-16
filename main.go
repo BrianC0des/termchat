@@ -49,9 +49,17 @@ func main() {
 		os.Exit(0)
 	}
 
+	cfg := system.LoadConfig()
 	name := *nameFlag
 	if name == "" {
-		name = defaultDeviceName()
+		if cfg.Nickname != "" {
+			name = cfg.Nickname
+		} else {
+			name = defaultDeviceName()
+		}
+	} else {
+		cfg.Nickname = name
+		system.SaveConfig(cfg)
 	}
 
 	// 1. Initialize Network Manager

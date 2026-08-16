@@ -674,7 +674,7 @@ func (m *Manager) ConnectRelay(relayURL, roomName string) {
 						m.cloudPeersMu.Lock()
 						m.cloudPeers = make(map[string]*PeerConnection)
 						for _, p := range peers {
-							if p.ID != m.LocalID {
+							if p.ID != m.LocalID && p.Name != "" {
 								m.cloudPeers[p.ID] = &PeerConnection{
 									ID:       p.ID,
 									Name:     p.Name,
@@ -684,7 +684,7 @@ func (m *Manager) ConnectRelay(relayURL, roomName string) {
 						}
 						m.cloudPeersMu.Unlock()
 						if m.events.OnPeerJoin != nil {
-							m.events.OnPeerJoin("room", "Room", "Cloud")
+							m.events.OnPeerJoin("", "", "")
 						}
 					}
 					continue
@@ -751,14 +751,11 @@ func (m *Manager) SendPacket(p *Packet) error {
 		return err
 	}
 
-	sentCount := 0
-
 	// 1. If in Cloud Room mode: send ONLY to Cloud Relay
 	if m.RoomName != "" {
 		m.relayMu.Lock()
 		if m.relayConn != nil {
 			_ = m.relayConn.WriteMessage(websocket.TextMessage, data)
-			sentCount++
 		}
 		m.relayMu.Unlock()
 	} else {
@@ -766,13 +763,8 @@ func (m *Manager) SendPacket(p *Packet) error {
 		m.peersMu.RLock()
 		for _, peer := range m.peers {
 			_ = m.sendToPeer(peer, p)
-			sentCount++
 		}
 		m.peersMu.RUnlock()
-	}
-
-	if sentCount == 0 {
-		return fmt.Errorf("no connected peers or cloud relay")
 	}
 
 	return nil

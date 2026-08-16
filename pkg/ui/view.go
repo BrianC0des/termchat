@@ -198,21 +198,16 @@ func (m *Model) renderSidebar(peers []network.PeerConnection) string {
 
 		// Show Connected Peers
 		if len(peers) == 0 {
-			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Render("  (Waiting for peers)\n"))
+			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Render("  (No other peers)\n"))
 		} else {
 			for _, p := range peers {
 				peerName := p.Name
-				battStr := ""
-				if batt, ok := m.peerBatteries[p.Name]; ok {
-					battStr = fmt.Sprintf(" 🔋%d%%", batt.Percentage)
+				if len(peerName) > 13 {
+					peerName = peerName[:11] + ".."
 				}
-				if len(peerName) > 10 {
-					peerName = peerName[:8] + ".."
-				}
-				sb.WriteString(fmt.Sprintf("%s %s%s\n",
+				sb.WriteString(fmt.Sprintf("%s %s\n",
 					lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A")).Render("●"),
 					lipgloss.NewStyle().Foreground(lipgloss.Color("#7DCFFF")).Render(peerName),
-					lipgloss.NewStyle().Foreground(lipgloss.Color("#E0AF68")).Render(battStr),
 				))
 			}
 		}
@@ -221,7 +216,7 @@ func (m *Model) renderSidebar(peers []network.PeerConnection) string {
 	sb.WriteString("\n")
 	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7AA2F7")).Render("QUICK ACTIONS"))
 	sb.WriteString("\n")
-	sb.WriteString(fmt.Sprintf("%s /files [Ctrl+F]\n%s /browse [Ctrl+O]\n%s /clip\n%s /battery\n%s /qr",
+	sb.WriteString(fmt.Sprintf("%s /copy <#> [Copy]\n%s /files [Ctrl+F]\n%s /browse [Ctrl+O]\n%s /clip [Sync]\n%s /qr [QR]",
 		HelpKeyStyle.Render("•"),
 		HelpKeyStyle.Render("•"),
 		HelpKeyStyle.Render("•"),

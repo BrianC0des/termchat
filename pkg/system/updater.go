@@ -51,7 +51,7 @@ func getPlatformBinaryName() string {
 
 func UpdateSelf() (string, error) {
 	binaryName := getPlatformBinaryName()
-	downloadURL := fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/v1.0.0/%s", binaryName)
+	downloadURL := fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", binaryName)
 
 	execPath, err := os.Executable()
 	if err != nil {
@@ -62,8 +62,14 @@ func UpdateSelf() (string, error) {
 		return "", fmt.Errorf("could not resolve symlinks: %w", err)
 	}
 
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Get(downloadURL)
+	req, err := http.NewRequest("GET", downloadURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("request creation error: %w", err)
+	}
+	req.Header.Set("User-Agent", "TermChat-Updater/1.0")
+
+	client := &http.Client{Timeout: 90 * time.Second}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("download error: %w", err)
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type ChatMessage struct {
@@ -356,16 +357,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case peerUpdateMsg:
-		action := "joined"
-		if !msg.joined {
-			action = "left"
+		if msg.name != "" {
+			action := "joined"
+			if !msg.joined {
+				action = "left"
+			}
+			m.messages = append(m.messages, ChatMessage{
+				SenderName: "SYSTEM",
+				Content:    fmt.Sprintf("👋 %s has %s", msg.name, action),
+				Timestamp:  time.Now(),
+				IsSystem:   true,
+			})
 		}
-		m.messages = append(m.messages, ChatMessage{
-			SenderName: "SYSTEM",
-			Content:    fmt.Sprintf("👋 %s (%s) has %s", msg.name, msg.addr, action),
-			Timestamp:  time.Now(),
-			IsSystem:   true,
-		})
 		m.viewport.SetContent(m.renderMessages())
 		m.viewport.GotoBottom()
 
@@ -378,10 +381,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 		m.viewport.SetContent(m.renderMessages())
 		m.viewport.GotoBottom()
-
-	case batteryMsg:
-		m.peerBatteries[msg.senderName] = msg.info
-		m.addSystemMsg(fmt.Sprintf("🔋 %s Battery: %d%% (%s, %s)", msg.senderName, msg.info.Percentage, msg.info.Status, msg.info.Plugged))
 
 	case execOutputMsg:
 		status := "✅ Output"
@@ -473,31 +472,24 @@ func (m *Model) handleInput(text string) {
 		return
 	}
 
-	// Normal Chat Message
-	err := m.manager.SendChat(text)
-	if err != nil {
-		m.messages = append(m.messages, ChatMessage{
-			SenderName: "SYSTEM",
-			Content:    fmt.Sprintf("⚠️ Could not send: %v (No peers connected yet)", err),
-			Timestamp:  time.Now(),
-			IsSystem:   true,
-		})
-	} else {
-		m.messages = append(m.messages, ChatMessage{
-			SenderID:   m.manager.LocalID,
-			SenderName: m.manager.LocalName,
-			Content:    text,
-			Timestamp:  time.Now(),
-			IsMe:       true,
-		})
-		system.AppendHistory(m.manager.RoomName, system.HistoryEntry{
-			SenderID:   m.manager.LocalID,
-			SenderName: m.manager.LocalName,
-			Content:    text,
-			Timestamp:  time.Now(),
-			IsMe:       true,
-		})
-	}
+	// Normal Chat Message - always append locally and save
+	m.messages = append(m.messages, ChatMessage{
+		SenderID:   m.manager.LocalID,
+		SenderName: m.manager.LocalName,
+		Content:    text,
+		Timestamp:  time.Now(),
+		IsMe:       true,
+	})
+	system.AppendHistory(m.manager.RoomName, system.HistoryEntry{
+		SenderID:   m.manager.LocalID,
+		SenderName: m.manager.LocalName,
+		Content:    text,
+		Timestamp:  time.Now(),
+		IsMe:       true,
+	})
+
+	_ = m.manager.SendChat(text)
+
 	m.viewport.SetContent(m.renderMessages())
 	m.viewport.GotoBottom()
 
@@ -527,30 +519,57 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			return
 		}
 		targetText := ""
-		if len(parts) > 1 && strings.ToLower(parts[1]) == "all" {
-			var sb strings.Builder
-			for _, msg := range m.messages {
-				sb.WriteString(fmt.Sprintf("[%s] %s: %s\n", msg.Timestamp.Format("15:04:05"), msg.SenderName, msg.Content))
-			}
-			targetText = sb.String()
-		} else if len(parts) > 1 && strings.ToLower(parts[1]) != "last" {
-			searchQuery := strings.ToLower(strings.Join(parts[1:], " "))
-			for i := len(m.messages) - 1; i >= 0; i-- {
-				if strings.Contains(strings.ToLower(m.messages[i].Content), searchQuery) {
-					targetText = m.messages[i].Content
-					break
+		copiedLabel := ""
+
+		if len(parts) > 1 {
+			arg := parts[1]
+			if strings.ToLower(arg) == "all" {
+				var sb strings.Builder
+				for _, msg := range m.messages {
+					sb.WriteString(fmt.Sprintf("[%s] %s: %s\n", msg.Timestamp.Format("15:04:05"), msg.SenderName, msg.Content))
+				}
+				targetText = sb.String()
+				copiedLabel = "Full chat history"
+			} else if num, err := strconv.Atoi(arg); err == nil {
+				// Copy by numbered message index
+				userMsgCount := 0
+				for _, msg := range m.messages {
+					if !msg.IsSystem {
+						userMsgCount++
+						if userMsgCount == num {
+							targetText = msg.Content
+							copiedLabel = fmt.Sprintf("Message #%d (%s)", num, msg.SenderName)
+							break
+						}
+					}
+				}
+				if targetText == "" {
+					m.addSystemMsg(fmt.Sprintf("❌ Message #%d not found. Total user messages: %d", num, userMsgCount))
+					return
+				}
+			} else {
+				// Search by text query
+				searchQuery := strings.ToLower(strings.Join(parts[1:], " "))
+				for i := len(m.messages) - 1; i >= 0; i-- {
+					if strings.Contains(strings.ToLower(m.messages[i].Content), searchQuery) {
+						targetText = m.messages[i].Content
+						copiedLabel = fmt.Sprintf("Search match (%s)", m.messages[i].SenderName)
+						break
+					}
 				}
 			}
 		} else {
-			// Copy latest message
+			// Copy latest non-system message
 			for i := len(m.messages) - 1; i >= 0; i-- {
 				if !m.messages[i].IsSystem {
 					targetText = m.messages[i].Content
+					copiedLabel = fmt.Sprintf("Latest message from %s", m.messages[i].SenderName)
 					break
 				}
 			}
 			if targetText == "" && len(m.messages) > 0 {
 				targetText = m.messages[len(m.messages)-1].Content
+				copiedLabel = "Latest message"
 			}
 		}
 
@@ -560,7 +579,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			if len(preview) > 50 {
 				preview = preview[:47] + "..."
 			}
-			m.addSystemMsg(fmt.Sprintf("📋 Copied message to clipboard: \"%s\"", preview))
+			m.addSystemMsg(fmt.Sprintf("📋 Copied %s to clipboard:\n   \"%s\"", copiedLabel, preview))
 		} else {
 			m.addSystemMsg("📋 No matching message found to copy")
 		}
@@ -595,19 +614,6 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 				preview = preview[:57] + "..."
 			}
 			m.addSystemMsg(fmt.Sprintf("📋 Synced local clipboard to peers: \"%s\"", preview))
-		}
-
-	case "/battery", "/batt":
-		p := &network.Packet{
-			Type:      network.MsgTypeBatteryReq,
-			SenderID:  m.manager.LocalID,
-			Sender:    m.manager.LocalName,
-			Timestamp: time.Now(),
-		}
-		if err := m.manager.SendPacket(p); err != nil {
-			m.addSystemMsg("❌ Could not request battery: no peers connected")
-		} else {
-			m.addSystemMsg("🔋 Requesting battery status from peers...")
 		}
 
 	case "/notify":
@@ -923,7 +929,10 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		}
 		newName := strings.Join(parts[1:], " ")
 		m.manager.SetName(newName)
-		m.addSystemMsg(fmt.Sprintf("🏷️ Changed nickname to '%s'", newName))
+		cfg := system.LoadConfig()
+		cfg.Nickname = newName
+		system.SaveConfig(cfg)
+		m.addSystemMsg(fmt.Sprintf("🏷️ Changed nickname to '%s' (saved as permanent default)", newName))
 
 	case "/connect":
 		if len(parts) < 2 {
@@ -1086,23 +1095,31 @@ func (m *Model) renderMessages() string {
 	bodyStyle := MessageText.Width(wrapWidth)
 
 	var sb strings.Builder
+	msgIdx := 1
 	for _, msg := range m.messages {
-		timeStr := TimeStyle.Render(msg.Timestamp.Format("15:04:05"))
 		if msg.IsSystem {
+			timeStr := TimeStyle.Render(msg.Timestamp.Format("15:04:05"))
 			if msg.IsFile {
 				sb.WriteString(fmt.Sprintf("%s %s\n\n", timeStr, FileNoticeStyle.Width(wrapWidth).Render(msg.Content)))
 			} else {
 				sb.WriteString(fmt.Sprintf("%s %s %s\n\n", timeStr, SenderSystemStyle.Render("SYSTEM ❯"), bodyStyle.Render(msg.Content)))
 			}
-		} else if msg.SenderName == "🤖 AGY" || strings.Contains(msg.SenderName, "AGY") {
-			nameTag := SenderBotStyle.Render(fmt.Sprintf("[%s]", msg.SenderName))
-			sb.WriteString(fmt.Sprintf("%s %s:\n%s\n\n", timeStr, nameTag, bodyStyle.Render(msg.Content)))
-		} else if msg.IsMe {
-			nameTag := SenderMeStyle.Render(fmt.Sprintf("[%s]", msg.SenderName))
-			sb.WriteString(fmt.Sprintf("%s %s: %s\n\n", timeStr, nameTag, bodyStyle.Render(msg.Content)))
 		} else {
-			nameTag := SenderPeerStyle.Render(fmt.Sprintf("[%s]", msg.SenderName))
-			sb.WriteString(fmt.Sprintf("%s %s: %s\n\n", timeStr, nameTag, bodyStyle.Render(msg.Content)))
+			numBadge := lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Render(fmt.Sprintf("#%d", msgIdx))
+			timeStr := TimeStyle.Render(msg.Timestamp.Format("15:04:05"))
+			prefix := fmt.Sprintf("%s %s", timeStr, numBadge)
+
+			if msg.SenderName == "🤖 AGY" || strings.Contains(msg.SenderName, "AGY") {
+				nameTag := SenderBotStyle.Render(fmt.Sprintf("[%s]", msg.SenderName))
+				sb.WriteString(fmt.Sprintf("%s %s:\n%s\n\n", prefix, nameTag, bodyStyle.Render(msg.Content)))
+			} else if msg.IsMe {
+				nameTag := SenderMeStyle.Render(fmt.Sprintf("[%s]", msg.SenderName))
+				sb.WriteString(fmt.Sprintf("%s %s: %s\n\n", prefix, nameTag, bodyStyle.Render(msg.Content)))
+			} else {
+				nameTag := SenderPeerStyle.Render(fmt.Sprintf("[%s]", msg.SenderName))
+				sb.WriteString(fmt.Sprintf("%s %s: %s\n\n", prefix, nameTag, bodyStyle.Render(msg.Content)))
+			}
+			msgIdx++
 		}
 	}
 	return sb.String()
