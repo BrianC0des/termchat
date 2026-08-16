@@ -17,11 +17,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Styling Tokens (OCD-Clean Minimalist Palette)
+// Styling Tokens
 var (
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#1A1B26")).
+			Foreground(lipgloss.Color("#15161E")).
 			Background(lipgloss.Color("#7AA2F7")).
 			Padding(0, 2)
 
@@ -42,12 +42,11 @@ var (
 			BorderForeground(lipgloss.Color("#3B4261")).
 			Padding(0, 1)
 
-	labelStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#BB9AF7")).
-			Bold(true)
-
-	valueStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#C0CAF5"))
+	colPlatformStyle = lipgloss.NewStyle().Width(26).Foreground(lipgloss.Color("#BB9AF7")).Bold(true)
+	colStatusStyle   = lipgloss.NewStyle().Width(12)
+	colSizeStyle     = lipgloss.NewStyle().Width(10).Foreground(lipgloss.Color("#C0CAF5"))
+	colDlStyle       = lipgloss.NewStyle().Width(10).Foreground(lipgloss.Color("#C0CAF5"))
+	colShaStyle      = lipgloss.NewStyle().Width(10).Foreground(lipgloss.Color("#565F89"))
 
 	badgeReady = lipgloss.NewStyle().
 			Bold(true).
@@ -61,12 +60,9 @@ var (
 			Background(lipgloss.Color("#E0AF68")).
 			Padding(0, 1)
 
-	dimStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#565F89"))
-
-	tableHeaderStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("#7DCFFF"))
+	labelStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#7DCFFF")).Bold(true)
+	valueStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#C0CAF5"))
+	dimStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89"))
 )
 
 type tickMsg time.Time
@@ -131,12 +127,12 @@ func initialModel() model {
 		relayURL:    "wss://termchat-o51d.onrender.com/ws",
 		latestTag:   "v1.8.0",
 		commitHash:  "main",
-		ghStatus:    "Syncing release telemetry...",
+		ghStatus:    "Syncing telemetry...",
 		platforms:   defaultPlatforms,
 		logFilter:   "ALL",
 		lastUpdated: time.Now(),
 		logs: []string{
-			fmt.Sprintf("%s [SYS] Dashboard telemetry engine connected", time.Now().Format("15:04:05")),
+			fmt.Sprintf("%s [SYS] Dashboard engine initialized", time.Now().Format("15:04:05")),
 			fmt.Sprintf("%s [NET] Latency probing active (GitHub / Fastly / Google / Relay)", time.Now().Format("15:04:05")),
 		},
 	}
@@ -294,7 +290,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "r":
-			m.logs = append(m.logs, fmt.Sprintf("%s [SYS] Telemetry refresh requested", time.Now().Format("15:04:05")))
+			m.logs = append(m.logs, fmt.Sprintf("%s [SYS] Refresh requested", time.Now().Format("15:04:05")))
 			return m, tea.Batch(fetchReleaseDataCmd(), fetchMirrorPingCmd(m.relayURL))
 		case "f":
 			switch m.logFilter {
@@ -349,12 +345,12 @@ func formatPing(ms int64) string {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("#F7768E")).Bold(true).Render("OFFLINE")
 	}
 	if ms < 100 {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A")).Bold(true).Render(fmt.Sprintf("%3d ms  [EXCELLENT]", ms))
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A")).Bold(true).Render(fmt.Sprintf("%3d ms [EXCELLENT]", ms))
 	}
 	if ms < 300 {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color("#7AA2F7")).Bold(true).Render(fmt.Sprintf("%3d ms  [GOOD]", ms))
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#7AA2F7")).Bold(true).Render(fmt.Sprintf("%3d ms [GOOD]", ms))
 	}
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("#E0AF68")).Bold(true).Render(fmt.Sprintf("%3d ms  [SLOW]", ms))
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("#E0AF68")).Bold(true).Render(fmt.Sprintf("%3d ms [SLOW]", ms))
 }
 
 func (m model) View() string {
@@ -362,20 +358,17 @@ func (m model) View() string {
 		return "Initializing Dashboard..."
 	}
 
-	// 1. Top Bar
-	topBar := titleStyle.Render("TERMCHAT OPERATIONS DASHBOARD") +
-		subtitleStyle.Render(fmt.Sprintf("Last Sync: %s  │  [R]efresh  [F]ilter: %-5s  [C]lear  [Q]uit", m.lastUpdated.Format("15:04:05"), m.logFilter))
-
-	// Layout Width Calculations
-	totalWidth := m.width - 4
-	if totalWidth < 80 {
-		totalWidth = 80
+	// Calculate strict Container Widths
+	containerWidth := m.width - 2
+	if containerWidth < 80 {
+		containerWidth = 80
 	}
 
-	leftWidth := (totalWidth * 62 / 100)
-	rightWidth := totalWidth - leftWidth - 2
+	// 1. Top Title Bar
+	topBar := titleStyle.Render("TERMCHAT OPERATIONS DASHBOARD") +
+		subtitleStyle.Render(fmt.Sprintf("Last Sync: %s │ [R]efresh [F]ilter: %-4s [C]lear [Q]uit", m.lastUpdated.Format("15:04:05"), m.logFilter))
 
-	// 2. Section 1: Crisp Clean Table for OS Matrix
+	// 2. Summary Bar
 	readyCount := 0
 	for _, p := range m.platforms {
 		if p.Status == "READY" {
@@ -383,25 +376,27 @@ func (m model) View() string {
 		}
 	}
 
-	summaryLine := fmt.Sprintf("%s %s   %s %s   %s %d   %s %d",
+	summaryText := fmt.Sprintf("%s %s  │  %s %s  │  %s %d dl  │  %s %d ⭐  │  %s %d/%d Published",
 		labelStyle.Render("Release:"), badgeReady.Render(m.latestTag),
 		labelStyle.Render("Commit:"), valueStyle.Render(m.commitHash),
 		labelStyle.Render("Downloads:"), m.totalDownloads,
 		labelStyle.Render("Stars:"), m.repoStars,
+		labelStyle.Render("Status:"), readyCount, len(m.platforms),
 	)
+	summaryBox := boxStyle.Width(containerWidth - 2).Render(summaryText)
 
-	// OCD Table Headers (Perfect Column Alignment)
-	tableHeader := fmt.Sprintf("%-24s  %-12s  %-9s  %-10s  %-8s",
-		tableHeaderStyle.Render("PLATFORM TARGET"),
-		tableHeaderStyle.Render("STATUS"),
-		tableHeaderStyle.Render("FILE SIZE"),
-		tableHeaderStyle.Render("DOWNLOADS"),
-		tableHeaderStyle.Render("SHA-256"),
+	// 3. Section 1: ALL-OS Platform Matrix Table
+	tableHeaderRow := lipgloss.JoinHorizontal(lipgloss.Left,
+		colPlatformStyle.Render("PLATFORM TARGET"),
+		colStatusStyle.Render("STATUS"),
+		colSizeStyle.Render("SIZE"),
+		colDlStyle.Render("DOWNLOADS"),
+		colShaStyle.Render("SHA-256"),
 	)
-	tableDivider := dimStyle.Render(strings.Repeat("─", leftWidth-4))
+	divider := dimStyle.Render(strings.Repeat("─", containerWidth-6))
 
-	var tableRows []string
-	tableRows = append(tableRows, tableHeader, tableDivider)
+	var matrixRows []string
+	matrixRows = append(matrixRows, tableHeaderRow, divider)
 
 	for _, p := range m.platforms {
 		statusBadge := badgeBuilding.Render(" BUILDING ")
@@ -409,58 +404,51 @@ func (m model) View() string {
 			statusBadge = badgeReady.Render("  READY   ")
 		}
 
-		sizeFormatted := dimStyle.Render("  --  ")
+		sizeStr := dimStyle.Render("  --  ")
 		if p.SizeMB > 0 {
-			sizeFormatted = valueStyle.Render(fmt.Sprintf("%4.1f MB", p.SizeMB))
+			sizeStr = valueStyle.Render(fmt.Sprintf("%4.1f MB", p.SizeMB))
 		}
 
-		dlFormatted := valueStyle.Render(fmt.Sprintf("%5d dl", p.Downloads))
-		shaFormatted := dimStyle.Render("[" + p.Sha256 + "]")
+		dlStr := valueStyle.Render(fmt.Sprintf("%4d dl", p.Downloads))
+		shaStr := dimStyle.Render("[" + p.Sha256 + "]")
 
-		row := fmt.Sprintf("%-24s  %s  %s  %s  %s",
-			labelStyle.Render(p.Name),
-			statusBadge,
-			sizeFormatted,
-			dlFormatted,
-			shaFormatted,
+		row := lipgloss.JoinHorizontal(lipgloss.Left,
+			colPlatformStyle.Render(p.Name),
+			colStatusStyle.Render(statusBadge),
+			colSizeStyle.Render(sizeStr),
+			colDlStyle.Render(dlStr),
+			colShaStyle.Render(shaStr),
 		)
-		tableRows = append(tableRows, row)
+		matrixRows = append(matrixRows, row)
 	}
 
-	// Clean Box Content
-	ciSummaryLine := dimStyle.Render("GH Actions Pipeline: ") + valueStyle.Render(m.ghStatus)
+	pipelineStr := dimStyle.Render("GH Actions Pipeline: ") + valueStyle.Render(m.ghStatus)
 
-	leftContent := lipgloss.JoinVertical(lipgloss.Left,
-		summaryLine,
+	matrixContent := lipgloss.JoinVertical(lipgloss.Left,
+		strings.Join(matrixRows, "\n"),
 		"",
-		strings.Join(tableRows, "\n"),
-		"",
-		ciSummaryLine,
+		pipelineStr,
 	)
 
-	leftBox := boxStyle.Width(leftWidth).Render(
-		headerStyle.Render(fmt.Sprintf("📦 ALL-OS PLATFORM RELEASE MATRIX  (%d/%d PUBLISHED)", readyCount, len(m.platforms))) + "\n\n" + leftContent,
+	matrixBox := boxStyle.Width(containerWidth - 2).Render(
+		headerStyle.Render("📦 ALL-OS PLATFORM RELEASE MATRIX") + "\n\n" + matrixContent,
 	)
 
-	// 3. Section 2: Infrastructure Metrics Card
-	metricsLines := []string{
-		fmt.Sprintf("%-22s %s", labelStyle.Render("Relay Server (ws):"), formatPing(m.relayMs)),
-		fmt.Sprintf("%-22s %s", labelStyle.Render("Fastly Edge CDN:"), formatPing(m.fastlyMs)),
-		fmt.Sprintf("%-22s %s", labelStyle.Render("GitHub REST API:"), formatPing(m.githubMs)),
-		fmt.Sprintf("%-22s %s", labelStyle.Render("Google Global DNS:"), formatPing(m.googleMs)),
-		"",
-		fmt.Sprintf("%-22s %s", labelStyle.Render("Archive Compression:"), valueStyle.Render("Zstandard (.tar.zst)")),
-		fmt.Sprintf("%-22s %s", labelStyle.Render("System Runtime:"), valueStyle.Render(runtime.GOOS+"/"+runtime.GOARCH)),
-		fmt.Sprintf("%-22s %s", labelStyle.Render("Staging Engine:"), valueStyle.Render("0s Instant Auto-Fetch")),
+	// 4. Section 2: Infrastructure & Latency Metrics Card
+	infraRows := []string{
+		fmt.Sprintf("%-24s %s", labelStyle.Render("Relay Server (ws):"), formatPing(m.relayMs)),
+		fmt.Sprintf("%-24s %s", labelStyle.Render("Fastly Edge CDN:"), formatPing(m.fastlyMs)),
+		fmt.Sprintf("%-24s %s", labelStyle.Render("GitHub REST API:"), formatPing(m.githubMs)),
+		fmt.Sprintf("%-24s %s", labelStyle.Render("Google Global DNS:"), formatPing(m.googleMs)),
+		fmt.Sprintf("%-24s %s", labelStyle.Render("Archive Compression:"), valueStyle.Render("Zstandard (.tar.zst)")),
+		fmt.Sprintf("%-24s %s", labelStyle.Render("Host OS / Runtime:"), valueStyle.Render(runtime.GOOS+"/"+runtime.GOARCH)),
 	}
 
-	rightBox := boxStyle.Width(rightWidth).Render(
-		headerStyle.Render("📊 MULTI-MIRROR PING & INFRASTRUCTURE") + "\n\n" + strings.Join(metricsLines, "\n"),
+	infraBox := boxStyle.Width(containerWidth - 2).Render(
+		headerStyle.Render("📊 MULTI-MIRROR LATENCY & INFRASTRUCTURE") + "\n\n" + strings.Join(infraRows, "\n"),
 	)
 
-	topRow := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, " ", rightBox)
-
-	// 4. Section 3: Live System Log Stream (Filtered)
+	// 5. Section 3: Live System Telemetry Stream (Filtered)
 	var filteredLogs []string
 	for _, l := range m.logs {
 		if m.logFilter == "ALL" || strings.Contains(l, "["+m.logFilter+"]") {
@@ -468,9 +456,9 @@ func (m model) View() string {
 		}
 	}
 
-	maxLogs := m.height - 22
-	if maxLogs < 4 {
-		maxLogs = 4
+	maxLogs := m.height - 30
+	if maxLogs < 3 {
+		maxLogs = 3
 	}
 	if len(filteredLogs) > maxLogs {
 		filteredLogs = filteredLogs[len(filteredLogs)-maxLogs:]
@@ -489,15 +477,19 @@ func (m model) View() string {
 		}
 	}
 
-	logsBox := boxStyle.Width(totalWidth).Render(
-		headerStyle.Render(fmt.Sprintf("📜 LIVE SYSTEM TELEMETRY & EVENT STREAM  [FILTER: %s]", m.logFilter)) + "\n\n" +
+	logsBox := boxStyle.Width(containerWidth - 2).Render(
+		headerStyle.Render(fmt.Sprintf("📜 TELEMETRY STREAM  [FILTER: %s]", m.logFilter)) + "\n\n" +
 			strings.Join(formattedLogs, "\n"),
 	)
 
 	return lipgloss.JoinVertical(lipgloss.Left,
 		topBar,
 		"",
-		topRow,
+		summaryBox,
+		"",
+		matrixBox,
+		"",
+		infraBox,
 		"",
 		logsBox,
 	)
