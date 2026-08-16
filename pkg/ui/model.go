@@ -663,15 +663,21 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		if relay == "" {
 			relay = "wss://termchat-o51d.onrender.com/ws"
 		}
+
+		// Clear previous room messages for a clean fresh room
+		m.messages = []ChatMessage{}
+		m.viewport.SetContent("")
+
 		m.manager.ConnectRelay(relay, newRoom)
 
 		// If password is provided in the same command: /room <name> <password>
 		if len(parts) >= 3 {
 			pass := parts[2]
 			m.manager.SetEncryptionPassphrase(pass)
-			m.addSystemMsg(fmt.Sprintf("☁️ Joined Room #%s with 🔒 AES-256 Password Protection!", newRoom))
+			m.addSystemMsg(fmt.Sprintf("☁️ Switched to clean Room #%s with 🔒 AES-256 Encryption!", newRoom))
 		} else {
-			m.addSystemMsg(fmt.Sprintf("☁️ Joined Room #%s (Unencrypted. Use `/auth <pass>` to lock)", newRoom))
+			m.manager.SetEncryptionPassphrase("")
+			m.addSystemMsg(fmt.Sprintf("☁️ Switched to clean Room #%s", newRoom))
 		}
 
 	case "/clear":
