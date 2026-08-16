@@ -14,10 +14,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
-const AppVersion = "v1.3.0"
+const AppVersion = "v1.5.0"
 
 type progressWriter struct {
 	total      int64
@@ -140,10 +141,18 @@ func FetchLatestVersionTag() (string, error) {
 
 	var data struct {
 		TagName string `json:"tag_name"`
+		Assets  []struct {
+			Name string `json:"name"`
+		} `json:"assets"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return "", err
 	}
+
+	if len(data.Assets) == 0 {
+		return "", fmt.Errorf("release assets for %s are still building on GitHub", data.TagName)
+	}
+
 	return data.TagName, nil
 }
 
@@ -170,6 +179,65 @@ func createOptimizedHTTPClient() *http.Client {
 		WriteBufferSize:     64 * 1024,
 	}
 	return &http.Client{Transport: transport, Timeout: 0}
+}
+
+func downloadMultiThreaded(client *http.Client, targetURL string, totalSize int64, pw *progressWriter) ([]byte, error) {
+	numChunks := 8
+	chunkSize := totalSize / int64(numChunks)
+	chunks := make([][]byte, numChunks)
+	var wg sync.WaitGroup
+	var errOnce sync.Once
+	var downloadErr error
+
+	for i := 0; i < numChunks; i++ {
+		wg.Add(1)
+		go func(chunkIndex int) {
+			defer wg.Done()
+			start := int64(chunkIndex) * chunkSize
+			end := start + chunkSize - 1
+			if chunkIndex == numChunks-1 {
+				end = totalSize - 1
+			}
+
+			req, err := http.NewRequest("GET", targetURL, nil)
+			if err != nil {
+				errOnce.Do(func() { downloadErr = err })
+				return
+			}
+			req.Header.Set("User-Agent", "TermChat-Updater/1.5")
+			req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
+
+			resp, err := client.Do(req)
+			if err != nil || (resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK) {
+				if resp != nil {
+					resp.Body.Close()
+				}
+				errOnce.Do(func() { downloadErr = fmt.Errorf("chunk download error: %v", err) })
+				return
+			}
+			defer resp.Body.Close()
+
+			var buf bytes.Buffer
+			dest := io.MultiWriter(&buf, pw)
+			_, err = io.Copy(dest, resp.Body)
+			if err != nil {
+				errOnce.Do(func() { downloadErr = err })
+				return
+			}
+			chunks[chunkIndex] = buf.Bytes()
+		}(i)
+	}
+
+	wg.Wait()
+	if downloadErr != nil {
+		return nil, downloadErr
+	}
+
+	var finalData bytes.Buffer
+	for _, c := range chunks {
+		finalData.Write(c)
+	}
+	return finalData.Bytes(), nil
 }
 
 func processAndWriteBinary(rawBytes []byte, destFile *os.File) error {
