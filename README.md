@@ -78,6 +78,7 @@ termchat
 | `@agy <prompt>` | | Ask Antigravity AI anything directly in the chatroom |
 | `/ip` / `/peers` | | Show local network info and connected peers |
 | `/clear` | | Clear screen messages |
+| `/update` | | 1-Click Self-Update TermChat to the latest version |
 | `/help` | `F1` | Open in-app help cheatsheet |
 | `/quit` | `Ctrl + C` | Exit TermChat |
 
