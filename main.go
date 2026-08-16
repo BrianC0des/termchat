@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"termchat/pkg/network"
+	"termchat/pkg/system"
 	"termchat/pkg/ui"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -34,7 +35,19 @@ func main() {
 	roomFlag := flag.String("room", "", "Secret Cloud Room name (e.g. -room secret-squad)")
 	passFlag := flag.String("pass", "", "Password / passphrase for AES-256 room encryption")
 	relayFlag := flag.String("relay", "wss://termchat-o51d.onrender.com/ws", "Cloud Relay WebSocket URL")
+	updateFlag := flag.Bool("update", false, "Self-update TermChat to the latest release")
 	flag.Parse()
+
+	if *updateFlag {
+		fmt.Println("⚡ Checking for TermChat updates from GitHub...")
+		path, err := system.UpdateSelf()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Update failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("✅ TermChat updated successfully at %s!\n", path)
+		os.Exit(0)
+	}
 
 	name := *nameFlag
 	if name == "" {

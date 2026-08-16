@@ -688,6 +688,17 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		_ = m.manager.SendPacket(p)
 		m.addSystemMsg(fmt.Sprintf("💻 Running remote command: `%s`...", shCmd))
 
+	case "/update", "/upgrade":
+		m.addSystemMsg("⚡ Checking for updates from GitHub...")
+		go func() {
+			path, err := system.UpdateSelf()
+			if err != nil {
+				m.addSystemMsg(fmt.Sprintf("❌ Update failed: %v", err))
+			} else {
+				m.addSystemMsg(fmt.Sprintf("✅ TermChat updated successfully at %s!\n💡 Please restart termchat to apply the update.", path))
+			}
+		}()
+
 	case "/auth", "/pass":
 		if len(parts) < 2 {
 			m.manager.SetEncryptionPassphrase("")
