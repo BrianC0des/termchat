@@ -39,13 +39,14 @@ func main() {
 	flag.Parse()
 
 	if *updateFlag {
-		fmt.Println("⚡ Checking for TermChat updates from GitHub...")
-		path, err := system.UpdateSelf()
+		msg, err := system.UpdateSelfWithProgress(func(progressMsg string) {
+			fmt.Println(progressMsg)
+		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "❌ Update failed: %v\n", err)
 			os.Exit(1)
 		}
-		fmt.Printf("✅ TermChat updated successfully at %s!\n", path)
+		fmt.Println(msg)
 		os.Exit(0)
 	}
 

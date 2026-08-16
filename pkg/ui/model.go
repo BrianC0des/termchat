@@ -544,7 +544,11 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 					}
 				}
 				if targetText == "" {
-					m.addSystemMsg(fmt.Sprintf("❌ Message #%d not found. Total user messages: %d", num, userMsgCount))
+					if userMsgCount == 0 {
+						m.addSystemMsg("📋 No chat messages in this room yet. Send a message first to copy it!")
+					} else {
+						m.addSystemMsg(fmt.Sprintf("❌ Message #%d not found. This room has %d chat message(s).", num, userMsgCount))
+					}
 					return
 				}
 			} else {
@@ -559,7 +563,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 				}
 			}
 		} else {
-			// Copy latest non-system message
+			// Copy latest message (prefer user chat, fallback to system notice)
 			for i := len(m.messages) - 1; i >= 0; i-- {
 				if !m.messages[i].IsSystem {
 					targetText = m.messages[i].Content
@@ -569,7 +573,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			}
 			if targetText == "" && len(m.messages) > 0 {
 				targetText = m.messages[len(m.messages)-1].Content
-				copiedLabel = "Latest message"
+				copiedLabel = "Latest notice"
 			}
 		}
 
@@ -581,7 +585,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			}
 			m.addSystemMsg(fmt.Sprintf("📋 Copied %s to clipboard:\n   \"%s\"", copiedLabel, preview))
 		} else {
-			m.addSystemMsg("📋 No matching message found to copy")
+			m.addSystemMsg("📋 No messages found to copy.")
 		}
 
 	case "/paste", "/p":
@@ -695,13 +699,14 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		m.addSystemMsg(fmt.Sprintf("💻 Running remote command: `%s`...", shCmd))
 
 	case "/update", "/upgrade":
-		m.addSystemMsg("⚡ Checking for updates from GitHub...")
 		go func() {
-			path, err := system.UpdateSelf()
+			msg, err := system.UpdateSelfWithProgress(func(progressMsg string) {
+				m.addSystemMsg(progressMsg)
+			})
 			if err != nil {
 				m.addSystemMsg(fmt.Sprintf("❌ Update failed: %v", err))
 			} else {
-				m.addSystemMsg(fmt.Sprintf("✅ TermChat updated successfully at %s!\n💡 Please restart termchat to apply the update.", path))
+				m.addSystemMsg(msg)
 			}
 		}()
 
