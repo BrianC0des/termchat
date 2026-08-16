@@ -20,6 +20,18 @@ type ThemePalette struct {
 }
 
 var Themes = map[string]ThemePalette{
+	"matrix": {
+		Name:        "Matrix Movie Hacker",
+		Primary:     lipgloss.Color("#00FF41"),
+		Secondary:   lipgloss.Color("#008F11"),
+		Accent:      lipgloss.Color("#55FF55"),
+		Warning:     lipgloss.Color("#00FF66"),
+		Muted:       lipgloss.Color("#006600"),
+		BgDark:      lipgloss.Color("#0A0E0A"),
+		BgLight:     lipgloss.Color("#001A00"),
+		Text:        lipgloss.Color("#00FF41"),
+		BorderColor: lipgloss.Color("#008F11"),
+	},
 	"tokyo-night": {
 		Name:        "Tokyo Night",
 		Primary:     lipgloss.Color("#7D56F4"),
@@ -80,18 +92,6 @@ var Themes = map[string]ThemePalette{
 		Text:        lipgloss.Color("#00F0FF"),
 		BorderColor: lipgloss.Color("#FF0055"),
 	},
-	"matrix": {
-		Name:        "Matrix",
-		Primary:     lipgloss.Color("#00FF41"),
-		Secondary:   lipgloss.Color("#008F11"),
-		Accent:      lipgloss.Color("#003B00"),
-		Warning:     lipgloss.Color("#55FF55"),
-		Muted:       lipgloss.Color("#005500"),
-		BgDark:      lipgloss.Color("#0D0208"),
-		BgLight:     lipgloss.Color("#001400"),
-		Text:        lipgloss.Color("#00FF41"),
-		BorderColor: lipgloss.Color("#008F11"),
-	},
 	"gruvbox": {
 		Name:        "Gruvbox Dark",
 		Primary:     lipgloss.Color("#FE8019"),
@@ -124,13 +124,62 @@ func ApplyTheme(name string) bool {
 	BgDark = palette.BgDark
 	BgLight = palette.BgLight
 
-	TitleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(PrimaryColor).Padding(0, 1)
+	TitleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#000000")).Background(PrimaryColor).Padding(0, 1)
 	SubTitleStyle = lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true)
+
+	BadgeOnline = lipgloss.NewStyle().Bold(true).Foreground(SecondaryColor).SetString("[ONLINE]")
+	BadgeOffline = lipgloss.NewStyle().Bold(true).Foreground(AccentColor).SetString("[OFFLINE]")
+
+	HeaderBox = lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder(), false, false, true, false).
+		BorderForeground(palette.BorderColor).
+		Padding(0, 1)
+
+	SidebarStyle = lipgloss.NewStyle().
+		Border(lipgloss.NormalBorder(), false, true, false, false).
+		BorderForeground(palette.BorderColor).
+		Padding(0, 1)
+
+	ChatBoxStyle = lipgloss.NewStyle().Padding(0, 1)
+
+	StatusBar = lipgloss.NewStyle().
+		Foreground(palette.Text).
+		Background(palette.BgLight).
+		Padding(0, 1)
+
 	SenderMeStyle = lipgloss.NewStyle().Bold(true).Foreground(PrimaryColor)
 	SenderPeerStyle = lipgloss.NewStyle().Bold(true).Foreground(SecondaryColor)
-	HeaderBox = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, false, true, false).BorderForeground(palette.BorderColor).Padding(0, 1)
-	SidebarStyle = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, true, false, false).BorderForeground(palette.BorderColor).Padding(0, 1)
+	SenderBotStyle = lipgloss.NewStyle().Bold(true).Foreground(AccentColor)
+	SenderSystemStyle = lipgloss.NewStyle().Bold(true).Foreground(WarningColor)
+
+	TimeStyle = lipgloss.NewStyle().Foreground(MutedColor)
 	MessageText = lipgloss.NewStyle().Foreground(palette.Text)
+
+	FileNoticeStyle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(AccentColor).
+		Background(palette.BgLight).
+		Padding(0, 1)
+
+	ErrorNoticeStyle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(AccentColor)
+
+	InputPromptStyle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(PrimaryColor)
+
+	InputBoxStyle = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(PrimaryColor).
+		Padding(0, 1)
+
+	HelpKeyStyle = lipgloss.NewStyle().
+		Bold(true).
+		Foreground(PrimaryColor)
+
+	HelpDescStyle = lipgloss.NewStyle().
+		Foreground(MutedColor)
 
 	return true
 }

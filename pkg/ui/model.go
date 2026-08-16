@@ -1480,11 +1480,11 @@ func (m *Model) renderMessages() string {
 
 	if m.roomTopic != "" {
 		topicBanner := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#E0AF68")).
-			Background(lipgloss.Color("#1F2335")).
+			Foreground(WarningColor).
+			Background(BgLight).
 			Bold(true).
 			Padding(0, 1).
-			Render(fmt.Sprintf("📌 ROOM TOPIC: %s", m.roomTopic))
+			Render(fmt.Sprintf("[TOPIC] %s", m.roomTopic))
 		sb.WriteString(topicBanner + "\n\n")
 	}
 
@@ -1495,31 +1495,31 @@ func (m *Model) renderMessages() string {
 			if msg.IsFile {
 				sb.WriteString(fmt.Sprintf("%s %s\n\n", timeStr, FileNoticeStyle.Width(wrapWidth).Render(msg.Content)))
 			} else {
-				sb.WriteString(fmt.Sprintf("%s %s %s\n\n", timeStr, SenderSystemStyle.Render("SYSTEM ❯"), bodyStyle.Render(msg.Content)))
+				sb.WriteString(fmt.Sprintf("%s %s %s\n\n", timeStr, SenderSystemStyle.Render("[SYS] >"), bodyStyle.Render(msg.Content)))
 			}
 		} else {
 			if msg.ReplyToNum > 0 {
 				replyQuote := lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#565F89")).
+					Foreground(MutedColor).
 					Italic(true).
-					Render(fmt.Sprintf("   ┌─ 💬 Replying to #%d (%s: \"%s\")", msg.ReplyToNum, msg.ReplyToSender, msg.ReplyToText))
+					Render(fmt.Sprintf("   |- Replying to #%d (%s: \"%s\")", msg.ReplyToNum, msg.ReplyToSender, msg.ReplyToText))
 				sb.WriteString(replyQuote + "\n")
 			}
 
-			numBadge := lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Render(fmt.Sprintf("#%d", msgIdx))
+			numBadge := lipgloss.NewStyle().Foreground(MutedColor).Render(fmt.Sprintf("#%d", msgIdx))
 			timeStr := TimeStyle.Render(msg.Timestamp.Format("15:04:05"))
 			prefix := fmt.Sprintf("%s %s", timeStr, numBadge)
 
 			renderedContent := msg.Content
 			myMention := "@" + m.manager.LocalName
 			if strings.Contains(strings.ToLower(renderedContent), strings.ToLower(myMention)) || strings.Contains(strings.ToLower(renderedContent), "@all") {
-				highlightStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFE600"))
+				highlightStyle := lipgloss.NewStyle().Bold(true).Foreground(WarningColor)
 				renderedContent = highlightStyle.Render(renderedContent)
 			} else {
 				renderedContent = bodyStyle.Render(renderedContent)
 			}
 
-			if msg.SenderName == "🤖 AGY" || strings.Contains(msg.SenderName, "AGY") {
+			if msg.SenderName == "[AI] AGY" || strings.Contains(msg.SenderName, "AGY") {
 				nameTag := SenderBotStyle.Render(fmt.Sprintf("[%s]", msg.SenderName))
 				sb.WriteString(fmt.Sprintf("%s %s:\n%s\n\n", prefix, nameTag, renderedContent))
 			} else if msg.IsMe {

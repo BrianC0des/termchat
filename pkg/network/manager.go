@@ -1155,22 +1155,22 @@ func (m *Manager) SendFileWithExpiry(filePath, expiry string) error {
 				}()
 			}
 			if m.events.OnSystemMsg != nil {
-				m.events.OnSystemMsg(fmt.Sprintf("☁️ Uploading %s '%s' (%s) [Expires: %s]...", badge, fileName, FormatBytes(fileSize), expiry))
+				m.events.OnSystemMsg(fmt.Sprintf("[NET] Uploading %s '%s' (%s) [Expires: %s]...", badge, fileName, FormatBytes(fileSize), expiry))
 			}
 			dlURL, _, _, expiresIn, err := m.UploadFileToRelay(filePath, expiry)
 			if err != nil {
 				if m.events.OnSystemMsg != nil {
-					m.events.OnSystemMsg(fmt.Sprintf("❌ Upload failed: %v", err))
+					m.events.OnSystemMsg(fmt.Sprintf("[ERR] Upload failed: %v", err))
 				}
 				return
 			}
-			shareMsg := fmt.Sprintf("%s Shared file: %s (%s)\n🔗 %s\n⏳ Auto-Expires in: %s\n💡 Type `/get %s` or click the link to download", badge, fileName, FormatBytes(fileSize), dlURL, expiresIn, dlURL)
+			shareMsg := fmt.Sprintf("%s Shared file: %s (%s)\n🔗 %s\n[TTL] Auto-Expires in: %s\n:: Type `/get %s` or click the link to download", badge, fileName, FormatBytes(fileSize), dlURL, expiresIn, dlURL)
 			_ = m.SendChat(shareMsg)
 			if m.events.OnMessage != nil {
 				m.events.OnMessage(m.LocalID, m.LocalName, shareMsg, time.Now(), 0, "", "")
 			}
 			if m.events.OnSystemMsg != nil {
-				m.events.OnSystemMsg(fmt.Sprintf("✅ Uploaded and shared '%s' to room #%s (Expires in %s)!", fileName, m.RoomName, expiresIn))
+				m.events.OnSystemMsg(fmt.Sprintf("[OK] Uploaded '%s' to room #%s (Expires in %s)!", fileName, m.RoomName, expiresIn))
 			}
 		}()
 		return nil

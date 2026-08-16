@@ -38,30 +38,30 @@ func (m *Model) View() string {
 	var modeBadge string
 	var statusBadge string
 	if m.manager.RoomName != "" {
-		modeBadge = lipgloss.NewStyle().Foreground(lipgloss.Color("#7AA2F7")).Bold(true).
-			Render(fmt.Sprintf("🌐 #%s", m.manager.RoomName))
+		modeBadge = lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).
+			Render(fmt.Sprintf("[ROOM] #%s", m.manager.RoomName))
 		if peerCount > 0 {
-			statusBadge = lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")).Bold(true).
-				Render(fmt.Sprintf("● %d IN ROOM", peerCount+1))
+			statusBadge = lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).
+				Render(fmt.Sprintf("[ONLINE] (%d)", peerCount+1))
 		} else {
-			statusBadge = lipgloss.NewStyle().Foreground(lipgloss.Color("#7DCFFF")).Bold(true).
-				Render("☁️ CONNECTED (1)")
+			statusBadge = lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).
+				Render("[RELAY] (1)")
 		}
 	} else {
-		modeBadge = lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A")).Bold(true).
-			Render("🏠 Local Wi-Fi")
+		modeBadge = lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).
+			Render("[LAN] Direct P2P")
 		if peerCount > 0 {
-			statusBadge = lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")).Bold(true).
-				Render(fmt.Sprintf("● %d ON LAN", peerCount))
+			statusBadge = lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).
+				Render(fmt.Sprintf("[P2P] (%d)", peerCount))
 		} else {
-			statusBadge = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true).
-				Render("○ SEARCHING LAN...")
+			statusBadge = lipgloss.NewStyle().Foreground(WarningColor).Bold(true).
+				Render("[SEARCHING LAN...]")
 		}
 	}
 
 	headerLeft := lipgloss.JoinHorizontal(
 		lipgloss.Center,
-		TitleStyle.Render("⚡ TERMCHAT"),
+		TitleStyle.Render(":: TERMCHAT ::"),
 		" ",
 		modeBadge,
 		" ",
@@ -71,7 +71,7 @@ func (m *Model) View() string {
 	// Encryption status badge in header
 	var lockBadge string
 	if m.manager.EncryptionKey != nil {
-		lockBadge = lipgloss.NewStyle().Foreground(lipgloss.Color("#BB9AF7")).Bold(true).Render(" 🔒 E2EE")
+		lockBadge = lipgloss.NewStyle().Foreground(AccentColor).Bold(true).Render(" [AES-256]")
 	}
 
 	headerRight := lipgloss.JoinHorizontal(
@@ -86,7 +86,7 @@ func (m *Model) View() string {
 		HelpDescStyle.Render(" Members"),
 		" ",
 		HelpKeyStyle.Render("F3"),
-		HelpDescStyle.Render(fmt.Sprintf(" Sidebar (%s)", m.getSidebarModeLabel())),
+		HelpDescStyle.Render(fmt.Sprintf(" View(%s)", m.getSidebarModeLabel())),
 		" ",
 		HelpKeyStyle.Render("^F"),
 		HelpDescStyle.Render(" Vault"),
@@ -141,9 +141,9 @@ func (m *Model) View() string {
 				pct = int((float64(t.DoneBytes) / float64(t.TotalBytes)) * 100)
 			}
 			progressBar := renderProgressBar(pct, 16)
-			prefix := "📥 Recv"
+			prefix := "[RECV]"
 			if !t.IsIncoming {
-				prefix = "📤 Send"
+				prefix = "[SEND]"
 			}
 			lines = append(lines, fmt.Sprintf("%s '%s': %s %d%% (%s/%s)",
 				prefix,
@@ -155,19 +155,19 @@ func (m *Model) View() string {
 			))
 		}
 		transferBar = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#E0AF68")).
-			Background(lipgloss.Color("#1F2335")).
+			Foreground(WarningColor).
+			Background(BgLight).
 			Padding(0, 1).
 			Width(m.width).
 			Render(strings.Join(lines, " | "))
 	}
 
 	// 5. Input Line
-	prompt := InputPromptStyle.Render(fmt.Sprintf("[%s] ❯ ", m.manager.LocalName))
+	prompt := InputPromptStyle.Render(fmt.Sprintf("%s@termchat:~$ ", m.manager.LocalName))
 	inputBox := lipgloss.JoinHorizontal(lipgloss.Center, prompt, m.textInput.View())
 	styledInput := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), true, false, false, false).
-		BorderForeground(lipgloss.Color("#3B4261")).
+		BorderForeground(PrimaryColor).
 		Width(m.width).
 		Padding(0, 1).
 		Render(inputBox)
@@ -189,7 +189,7 @@ func (m *Model) getSidebarModeLabel() string {
 	case SidebarHidden:
 		return "Zen"
 	default:
-		return "Normal"
+		return "Norm"
 	}
 }
 
@@ -197,14 +197,14 @@ func (m *Model) renderSidebar(peers []network.PeerConnection, width int) string 
 	var sb strings.Builder
 
 	totalCount := len(peers) + 1
-	dropdownIcon := "▾"
+	dropdownIcon := "v"
 	if !m.showMembersDropdown {
-		dropdownIcon = "▸"
+		dropdownIcon = ">"
 	}
 
 	headerText := fmt.Sprintf("MEMBERS (%d) %s", totalCount, dropdownIcon)
-	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7AA2F7")).Render(headerText))
-	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Render(" [F2]"))
+	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(PrimaryColor).Render(headerText))
+	sb.WriteString(lipgloss.NewStyle().Foreground(MutedColor).Render(" [F2]"))
 	sb.WriteString("\n")
 
 	if m.showMembersDropdown {
@@ -229,15 +229,15 @@ func (m *Model) renderSidebar(peers []network.PeerConnection, width int) string 
 			}
 		}
 		sb.WriteString(fmt.Sprintf("%s %s %s%s\n",
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A")).Render("●"),
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#C0CAF5")).Render(myName),
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#E0AF68")).Render("(You)"),
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#7AA2F7")).Render(statusStr),
+			lipgloss.NewStyle().Foreground(SecondaryColor).Render("*"),
+			MessageText.Render(myName),
+			lipgloss.NewStyle().Foreground(WarningColor).Render("(You)"),
+			lipgloss.NewStyle().Foreground(PrimaryColor).Render(statusStr),
 		))
 
 		// Show Connected Peers
 		if len(peers) == 0 {
-			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Render("  (No other peers)\n"))
+			sb.WriteString(lipgloss.NewStyle().Foreground(MutedColor).Render("  (No peers)\n"))
 		} else {
 			for _, p := range peers {
 				peerName := p.Name
@@ -256,9 +256,9 @@ func (m *Model) renderSidebar(peers []network.PeerConnection, width int) string 
 					peerName = peerName[:maxNameLen-2] + ".."
 				}
 				sb.WriteString(fmt.Sprintf("%s %s%s\n",
-					lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A")).Render("●"),
-					lipgloss.NewStyle().Foreground(lipgloss.Color("#7DCFFF")).Render(peerName),
-					lipgloss.NewStyle().Foreground(lipgloss.Color("#7AA2F7")).Render(peerStatus),
+					lipgloss.NewStyle().Foreground(SecondaryColor).Render("*"),
+					lipgloss.NewStyle().Foreground(PrimaryColor).Render(peerName),
+					lipgloss.NewStyle().Foreground(SecondaryColor).Render(peerStatus),
 				))
 			}
 		}
@@ -268,39 +268,38 @@ func (m *Model) renderSidebar(peers []network.PeerConnection, width int) string 
 		// Wide Mode Extra Panels
 		if m.roomTopic != "" {
 			sb.WriteString("\n")
-			sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E0AF68")).Render("TOPIC"))
+			sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(WarningColor).Render("TOPIC"))
 			sb.WriteString("\n")
 			topicSnippet := m.roomTopic
 			if len(topicSnippet) > 28 {
 				topicSnippet = topicSnippet[:25] + "..."
 			}
-			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#C0CAF5")).Render(topicSnippet))
+			sb.WriteString(MessageText.Render(topicSnippet))
 			sb.WriteString("\n")
 		}
 
 		if len(m.pinnedMsgs) > 0 {
 			sb.WriteString("\n")
-			sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#BB9AF7")).Render(fmt.Sprintf("PINS (%d)", len(m.pinnedMsgs))))
+			sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(AccentColor).Render(fmt.Sprintf("PINS (%d)", len(m.pinnedMsgs))))
 			sb.WriteString("\n")
-			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Render("Type /pins to view all\n"))
+			sb.WriteString(lipgloss.NewStyle().Foreground(MutedColor).Render("Type /pins to view\n"))
 		}
 	}
 
 	sb.WriteString("\n")
-	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7AA2F7")).Render("QUICK ACTIONS"))
+	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(PrimaryColor).Render("COMMANDS"))
 	sb.WriteString("\n")
-	sb.WriteString(fmt.Sprintf("%s /reply <#> [Reply]\n%s /theme [Themes]\n%s /status [Status]\n%s /pin [Pins]\n%s /copy <#> [Copy]\n%s /files [Ctrl+F]\n%s /browse [Ctrl+O]",
-		HelpKeyStyle.Render("•"),
-		HelpKeyStyle.Render("•"),
-		HelpKeyStyle.Render("•"),
-		HelpKeyStyle.Render("•"),
-		HelpKeyStyle.Render("•"),
-		HelpKeyStyle.Render("•"),
-		HelpKeyStyle.Render("•"),
+	sb.WriteString(fmt.Sprintf("%s /reply <#>\n%s /theme <name>\n%s /pin <#>\n%s /copy <#>\n%s /files [^F]\n%s /browse [^O]",
+		HelpKeyStyle.Render(">"),
+		HelpKeyStyle.Render(">"),
+		HelpKeyStyle.Render(">"),
+		HelpKeyStyle.Render(">"),
+		HelpKeyStyle.Render(">"),
+		HelpKeyStyle.Render(">"),
 	))
 
 	sb.WriteString("\n\n")
-	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7AA2F7")).Render("DOWNLOADS"))
+	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(PrimaryColor).Render("DOWNLOADS"))
 	sb.WriteString("\n")
 	dirStr := m.manager.DownloadDir
 	maxDirLen := 18
@@ -310,7 +309,7 @@ func (m *Model) renderSidebar(peers []network.PeerConnection, width int) string 
 	if len(dirStr) > maxDirLen {
 		dirStr = "..." + dirStr[len(dirStr)-(maxDirLen-3):]
 	}
-	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Render(dirStr))
+	sb.WriteString(lipgloss.NewStyle().Foreground(MutedColor).Render(dirStr))
 
 	return sb.String()
 }
@@ -326,7 +325,7 @@ func (m *Model) renderHelpView() string {
 		Width(boxWidth).
 		Height(boxHeight)
 
-	title := TitleStyle.Render("⚡ TERMCHAT COMMAND CHEATSHEET")
+	title := TitleStyle.Render(":: TERMCHAT COMMAND CHEATSHEET ::")
 	content := fmt.Sprintf(`
 %s
 
@@ -362,7 +361,7 @@ func (m *Model) renderHelpView() string {
 		HelpKeyStyle.Render("/pin <#>         "), HelpDescStyle.Render("Pin important message to the top header banner"),
 		HelpKeyStyle.Render("/clip / /c       "), HelpDescStyle.Render("Sync current system clipboard content with peers"),
 		HelpKeyStyle.Render("F3 / Ctrl+B      "), HelpDescStyle.Render("Toggle sidebar (Normal, Wide, Zen Fullscreen)"),
-		HelpKeyStyle.Render("/theme <name>    "), HelpDescStyle.Render("Switch color theme (catppuccin, dracula, nord, cyber, etc.)"),
+		HelpKeyStyle.Render("/theme <name>    "), HelpDescStyle.Render("Switch color theme (catppuccin, dracula, nord, matrix, etc.)"),
 		HelpKeyStyle.Render("/dir <path>      "), HelpDescStyle.Render("Change destination directory for incoming downloads"),
 		HelpKeyStyle.Render("/qr              "), HelpDescStyle.Render("Display ASCII QR Code for fast mobile pairing"),
 		HelpKeyStyle.Render("/clear / /quit   "), HelpDescStyle.Render("Clear message buffer / Quit TermChat"),
@@ -386,7 +385,7 @@ func (m *Model) renderQRView() string {
 		Padding(1, 2).
 		Width(boxWidth)
 
-	title := TitleStyle.Render("📶 WI-FI PAIRING QR CODE")
+	title := TitleStyle.Render(":: WI-FI PAIRING QR CODE ::")
 	content := fmt.Sprintf("%s\n\n%s\n\n%s",
 		title,
 		m.qrContent,
@@ -403,7 +402,7 @@ func (m *Model) renderQRView() string {
 }
 
 func (m *Model) renderFilesModal() string {
-	boxWidth := min(m.width-4, 70)
+	boxWidth := min(m.width-4, 74)
 	filesBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(PrimaryColor).
@@ -411,26 +410,26 @@ func (m *Model) renderFilesModal() string {
 		Width(boxWidth)
 
 	var sb strings.Builder
-	title := TitleStyle.Render("📁 ROOM SHARED FILES")
+	title := TitleStyle.Render(":: ROOM SHARED FILES VAULT ::")
 	sb.WriteString(fmt.Sprintf("%s (Total: %d)\n", title, len(m.sharedFiles)))
-	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Render("Use ↑/↓ to select, [Enter] to download, [O] open in browser\n\n"))
+	sb.WriteString(lipgloss.NewStyle().Foreground(MutedColor).Render("Use ^/v to select, [Enter] to download, [O] open link in browser\n\n"))
 
 	if len(m.sharedFiles) == 0 {
-		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#7AA2F7")).Render("No files shared in this room yet.\nPress Ctrl+O or type `/send <path>` to share a file!\n\n"))
+		sb.WriteString(lipgloss.NewStyle().Foreground(PrimaryColor).Render("No files shared in this room yet.\nPress Ctrl+O or type `/send <path>` to share a file!\n\n"))
 	} else {
 		for i, f := range m.sharedFiles {
 			cursor := "  "
-			itemStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#C0CAF5"))
+			itemStyle := MessageText
 			if i == m.selectedFileIdx {
-				cursor = "❯ "
+				cursor = "> "
 				itemStyle = lipgloss.NewStyle().
 					Bold(true).
-					Foreground(lipgloss.Color("#7AA2F7")).
-					Background(lipgloss.Color("#24283B"))
+					Foreground(PrimaryColor).
+					Background(BgLight)
 			}
 
-			senderStr := lipgloss.NewStyle().Foreground(lipgloss.Color("#E0AF68")).Render(fmt.Sprintf("by %s", f.Sender))
-			timeStr := lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Render(f.Time.Format("15:04"))
+			senderStr := lipgloss.NewStyle().Foreground(WarningColor).Render(fmt.Sprintf("by %s", f.Sender))
+			timeStr := TimeStyle.Render(f.Time.Format("15:04"))
 
 			line := fmt.Sprintf("%s#%d  %-25s  %s  %s", cursor, f.Index, f.FileName, senderStr, timeStr)
 			sb.WriteString(itemStyle.Render(line))
@@ -439,7 +438,7 @@ func (m *Model) renderFilesModal() string {
 		sb.WriteString("\n")
 	}
 
-	sb.WriteString(lipgloss.NewStyle().Foreground(SecondaryColor).Render("[Enter] Download to ~/Downloads    [O] Open Link    [Esc] Close"))
+	sb.WriteString(lipgloss.NewStyle().Foreground(SecondaryColor).Render("[Enter] Download    [O] Open Link    [Esc] Close"))
 
 	return lipgloss.Place(
 		m.width,
@@ -460,10 +459,9 @@ func renderProgressBar(pct, width int) string {
 	}
 	emptyLen := width - filledLen
 
-	filled := strings.Repeat("█", filledLen)
-	empty := strings.Repeat("░", emptyLen)
+	filled := strings.Repeat("=", filledLen)
+	empty := strings.Repeat("-", emptyLen)
 
-	return lipgloss.NewStyle().Foreground(SecondaryColor).Render(filled) +
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#3B4261")).Render(empty)
+	return lipgloss.NewStyle().Foreground(SecondaryColor).Render("["+filled) +
+		lipgloss.NewStyle().Foreground(MutedColor).Render(empty+"]")
 }
-
