@@ -21,6 +21,9 @@ jobs:
         with:
           go-version: '1.22'
 
+      - name: Install zstd
+        run: sudo apt-get update && sudo apt-get install -y zstd
+
       - name: Build & Compress All Binaries
         run: |
           mkdir -p dist
@@ -41,8 +44,14 @@ jobs:
           CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -ldflags="-s -w" -o dist/termchat-android-arm64 .
           CGO_ENABLED=0 GOOS=linux GOARCH=arm go build -ldflags="-s -w" -o dist/termchat-android-arm .
 
-          # Create compressed archives (.tar.gz / .zip) & SHA256 checksums
+          # Create Pacman-style Zstandard compressed archives (.tar.zst) & Gzip (.tar.gz)
           cd dist
+          tar --zstd -cvf termchat-linux-amd64.tar.zst termchat-linux-amd64
+          tar --zstd -cvf termchat-linux-arm64.tar.zst termchat-linux-arm64
+          tar --zstd -cvf termchat-mac-apple-silicon.tar.zst termchat-mac-apple-silicon
+          tar --zstd -cvf termchat-mac-intel.tar.zst termchat-mac-intel
+          tar --zstd -cvf termchat-android-arm64.tar.zst termchat-android-arm64
+          tar --zstd -cvf termchat-android-arm.tar.zst termchat-android-arm
           tar -czvf termchat-linux-amd64.tar.gz termchat-linux-amd64
           tar -czvf termchat-linux-arm64.tar.gz termchat-linux-arm64
           tar -czvf termchat-mac-apple-silicon.tar.gz termchat-mac-apple-silicon
@@ -57,6 +66,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
+            dist/*.tar.zst
             dist/*.tar.gz
             dist/*.zip
             dist/checksums.txt

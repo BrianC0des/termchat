@@ -8,6 +8,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"github.com/klauspost/compress/zstd"
 	"io"
 	"net"
 	"net/http"
@@ -19,7 +20,7 @@ import (
 	"time"
 )
 
-const AppVersion = "v1.7.2"
+const AppVersion = "v1.8.0"
 
 var (
 	preFetchMu       sync.RWMutex
@@ -304,9 +305,38 @@ func downloadMultiThreaded(client *http.Client, targetURL string, totalSize int6
 	return finalData.Bytes(), nil
 }
 
+func extractTarZst(zstdData []byte, destFile *os.File) error {
+	zr, err := zstd.NewReader(bytes.NewReader(zstdData))
+	if err != nil {
+		return err
+	}
+	defer zr.Close()
+
+	tr := tar.NewReader(zr)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if header.Typeflag == tar.TypeReg {
+			_, err := io.Copy(destFile, tr)
+			return err
+		}
+	}
+	return fmt.Errorf("no executable binary found in zstd archive")
+}
+
 func processAndWriteBinary(rawBytes []byte, destFile *os.File) error {
 	if len(rawBytes) < 100000 {
 		return fmt.Errorf("downloaded asset is too small (%d bytes), likely an error response", len(rawBytes))
+	}
+
+	// 0. Zstandard Archive (.tar.zst) -> 0x28 0xB5 0x2F 0xFD
+	if rawBytes[0] == 0x28 && rawBytes[1] == 0xb5 && rawBytes[2] == 0x2f && rawBytes[3] == 0xfd {
+		return extractTarZst(rawBytes, destFile)
 	}
 
 	// 1. GZIP Archive (.tar.gz) -> 0x1F 0x8B
@@ -370,7 +400,7 @@ func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 		}()
 
 		binaryName := getPlatformBinaryName()
-		ext := ".tar.gz"
+		ext := ".tar.zst"
 		if runtime.GOOS == "windows" {
 			ext = ".zip"
 		}
@@ -378,8 +408,10 @@ func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 
 		urls := []string{
 			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", archiveName),
+			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s.tar.gz", binaryName),
 			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", binaryName),
 			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, archiveName),
+			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s.tar.gz", latestTag, binaryName),
 			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, binaryName),
 		}
 
@@ -513,7 +545,7 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	}
 
 	binaryName := getPlatformBinaryName()
-	ext := ".tar.gz"
+	ext := ".tar.zst"
 	if runtime.GOOS == "windows" {
 		ext = ".zip"
 	}
@@ -521,8 +553,10 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 
 	urls := []string{
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", archiveName),
+		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s.tar.gz", binaryName),
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", binaryName),
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, archiveName),
+		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s.tar.gz", latestTag, binaryName),
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, binaryName),
 	}
 
