@@ -33,7 +33,7 @@ func main() {
 	connectFlag := flag.String("connect", "", "Directly connect to a peer address (e.g. 192.168.1.50:7332)")
 	roomFlag := flag.String("room", "", "Secret Cloud Room name (e.g. -room secret-squad)")
 	passFlag := flag.String("pass", "", "Password / passphrase for AES-256 room encryption")
-	relayFlag := flag.String("relay", "wss://termchat-relay.fly.dev/ws", "Cloud Relay WebSocket URL")
+	relayFlag := flag.String("relay", "wss://termchat-o51d.onrender.com/ws", "Cloud Relay WebSocket URL")
 	flag.Parse()
 
 	name := *nameFlag

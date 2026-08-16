@@ -661,7 +661,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		newRoom := parts[1]
 		relay := m.manager.RelayURL
 		if relay == "" {
-			relay = "wss://termchat-relay.fly.dev/ws"
+			relay = "wss://termchat-o51d.onrender.com/ws"
 		}
 		m.manager.ConnectRelay(relay, newRoom)
 
