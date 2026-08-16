@@ -1,0 +1,927 @@
+package network
+
+import (
+	"bufio"
+	"context"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+
+	"termchat/pkg/system"
+
+	"github.com/gorilla/websocket"
+)
+
+const (
+	ChunkSize      = 32 * 1024 // 32KB per chunk
+	DefaultTCPPort = 7332
+)
+
+type PeerConnection struct {
+	ID        string
+	Name      string
+	RemoteIP  string
+	Conn      net.Conn
+	Writer    *bufio.Writer
+	writeMu   sync.Mutex
+	Connected time.Time
+}
+
+type FileTransferProgress struct {
+	FileID     string
+	FileName   string
+	TotalBytes int64
+	DoneBytes  int64
+	IsIncoming bool
+	IsDone     bool
+	Error      string
+	SavedPath  string
+}
+
+type NetworkEvents struct {
+	OnMessage      func(senderID, senderName, text string, ts time.Time)
+	OnPeerJoin     func(id, name, addr string)
+	OnPeerLeave    func(id, name string)
+	OnSystemMsg    func(text string)
+	OnFileProgress func(p FileTransferProgress)
+	OnFileReceived func(fileName, savedPath string, size int64, senderName string)
+	OnBattery      func(senderName string, info system.BatteryInfo)
+	OnExecOutput   func(senderName, cmd, output string, isError bool)
+}
+
+type incomingFileState struct {
+	fileID     string
+	fileName   string
+	fileSize   int64
+	senderName string
+	tempFile   *os.File
+	written    int64
+	targetPath string
+}
+
+type Manager struct {
+	LocalID       string
+	LocalName     string
+	TCPPort       int
+	DownloadDir   string
+	EncryptionKey []byte
+	RoomName      string
+	RelayURL      string
+
+	listener    net.Listener
+	discovery   *DiscoveryService
+	peers       map[string]*PeerConnection
+	peersMu     sync.RWMutex
+	events      NetworkEvents
+
+	relayConn   *websocket.Conn
+	relayMu     sync.Mutex
+
+	incomingMu  sync.Mutex
+	incomingMap map[string]*incomingFileState
+
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func GenerateID() string {
+	bytes := make([]byte, 8)
+	_, _ = rand.Read(bytes)
+	return hex.EncodeToString(bytes)
+}
+
+func NewManager(name string, tcpPort, udpPort int, downloadDir string, events NetworkEvents) (*Manager, error) {
+	if downloadDir == "" {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			downloadDir = filepath.Join(home, "Downloads")
+		} else {
+			downloadDir = "./downloads"
+		}
+	}
+	_ = os.MkdirAll(downloadDir, 0755)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	id := GenerateID()
+
+	m := &Manager{
+		LocalID:     id,
+		LocalName:   name,
+		TCPPort:     tcpPort,
+		DownloadDir: downloadDir,
+		peers:       make(map[string]*PeerConnection),
+		incomingMap: make(map[string]*incomingFileState),
+		events:      events,
+		ctx:         ctx,
+		cancel:      cancel,
+	}
+
+	// Try listening on TCP port
+	var ln net.Listener
+	var err error
+	for i := 0; i < 10; i++ {
+		portToTry := tcpPort + i
+		ln, err = net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", portToTry))
+		if err == nil {
+			m.TCPPort = portToTry
+			m.listener = ln
+			break
+		}
+	}
+	if m.listener == nil {
+		cancel()
+		return nil, fmt.Errorf("failed to bind TCP port: %w", err)
+	}
+
+	// Initialize UDP Discovery
+	m.discovery = NewDiscoveryService(
+		m.LocalID,
+		m.LocalName,
+		m.TCPPort,
+		udpPort,
+		m.handleDiscoveredPeer,
+		m.handleLostPeer,
+	)
+
+	return m, nil
+}
+
+func (m *Manager) SetEvents(events NetworkEvents) {
+	m.events = events
+}
+
+func (m *Manager) SetEncryptionPassphrase(passphrase string) {
+	if passphrase == "" {
+		m.EncryptionKey = nil
+	} else {
+		m.EncryptionKey = system.DeriveKey(passphrase)
+	}
+}
+
+func (m *Manager) Start() error {
+	go m.acceptLoop()
+	if err := m.discovery.Start(); err != nil {
+		if m.events.OnSystemMsg != nil {
+			m.events.OnSystemMsg(fmt.Sprintf("⚠️ UDP Discovery warning: %v (Direct connect still works)", err))
+		}
+	}
+	return nil
+}
+
+func (m *Manager) Stop() {
+	m.cancel()
+	if m.discovery != nil {
+		m.discovery.Stop()
+	}
+	if m.listener != nil {
+		_ = m.listener.Close()
+	}
+
+	m.peersMu.Lock()
+	for _, p := range m.peers {
+		_ = p.Conn.Close()
+	}
+	m.peers = make(map[string]*PeerConnection)
+	m.peersMu.Unlock()
+}
+
+func (m *Manager) SetName(newName string) {
+	m.LocalName = newName
+	if m.discovery != nil {
+		m.discovery.UpdateName(newName)
+	}
+	// Broadcast new handshake to active peers
+	m.peersMu.RLock()
+	defer m.peersMu.RUnlock()
+	p := &Packet{
+		Type:      MsgTypeHandshake,
+		SenderID:  m.LocalID,
+		Sender:    newName,
+		Timestamp: time.Now(),
+	}
+	for _, peer := range m.peers {
+		_ = m.sendToPeer(peer, p)
+	}
+}
+
+func (m *Manager) acceptLoop() {
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		default:
+		}
+
+		conn, err := m.listener.Accept()
+		if err != nil {
+			continue
+		}
+
+		go m.handleIncomingConnection(conn)
+	}
+}
+
+func (m *Manager) handleDiscoveredPeer(peer DiscoveredPeer) {
+	if peer.ID == m.LocalID {
+		return
+	}
+
+	m.peersMu.RLock()
+	_, exists := m.peers[peer.ID]
+	m.peersMu.RUnlock()
+
+	if exists {
+		return
+	}
+
+	// Tie-breaking: only smaller UUID initiates TCP connection to prevent dual connection races
+	if strings.Compare(m.LocalID, peer.ID) < 0 {
+		go m.ConnectTo(peer.Addr())
+	}
+}
+
+func (m *Manager) handleLostPeer(peerID string) {
+	// UDP lost does not close healthy TCP connections
+}
+
+func (m *Manager) ConnectTo(addr string) {
+	conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
+	if err != nil {
+		return
+	}
+
+	peerConn := &PeerConnection{
+		RemoteIP:  addr,
+		Conn:      conn,
+		Writer:    bufio.NewWriter(conn),
+		Connected: time.Now(),
+	}
+
+	// Send handshake
+	handshake := &Packet{
+		Type:      MsgTypeHandshake,
+		SenderID:  m.LocalID,
+		Sender:    m.LocalName,
+		Timestamp: time.Now(),
+	}
+	if err := m.sendToPeer(peerConn, handshake); err != nil {
+		_ = conn.Close()
+		return
+	}
+
+	go m.readLoop(peerConn)
+}
+
+func (m *Manager) handleIncomingConnection(conn net.Conn) {
+	peerConn := &PeerConnection{
+		RemoteIP:  conn.RemoteAddr().String(),
+		Conn:      conn,
+		Writer:    bufio.NewWriter(conn),
+		Connected: time.Now(),
+	}
+
+	// Send local handshake
+	handshake := &Packet{
+		Type:      MsgTypeHandshake,
+		SenderID:  m.LocalID,
+		Sender:    m.LocalName,
+		Timestamp: time.Now(),
+	}
+	if err := m.sendToPeer(peerConn, handshake); err != nil {
+		_ = conn.Close()
+		return
+	}
+
+	m.readLoop(peerConn)
+}
+
+func (m *Manager) readLoop(p *PeerConnection) {
+	reader := bufio.NewReader(p.Conn)
+	defer func() {
+		_ = p.Conn.Close()
+		wasActive := false
+		m.peersMu.Lock()
+		if p.ID != "" {
+			if curr, ok := m.peers[p.ID]; ok && curr == p {
+				delete(m.peers, p.ID)
+				wasActive = true
+			}
+		}
+		m.peersMu.Unlock()
+		if wasActive && m.events.OnPeerLeave != nil {
+			m.events.OnPeerLeave(p.ID, p.Name)
+		}
+	}()
+
+	for {
+		select {
+		case <-m.ctx.Done():
+			return
+		default:
+		}
+
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			return
+		}
+
+		packet, err := DecodePacket(line)
+		if err != nil {
+			continue
+		}
+
+		m.handlePacket(p, packet)
+	}
+}
+
+func (m *Manager) handlePacket(p *PeerConnection, pkt *Packet) {
+	// Handle encrypted wrapper packet
+	if pkt.Type == MsgTypeEncrypted {
+		if m.EncryptionKey == nil {
+			if m.events.OnSystemMsg != nil {
+				m.events.OnSystemMsg("🔒 Received encrypted packet but no passphrase is set. Use `/auth <passphrase>`")
+			}
+			return
+		}
+		decryptedJSON, err := system.Decrypt(pkt.Content, m.EncryptionKey)
+		if err != nil {
+			if m.events.OnSystemMsg != nil {
+				m.events.OnSystemMsg("❌ Decryption failed: wrong passphrase or corrupted data")
+			}
+			return
+		}
+		var innerPkt Packet
+		if err := json.Unmarshal([]byte(decryptedJSON), &innerPkt); err == nil {
+			pkt = &innerPkt
+		}
+	}
+
+	switch pkt.Type {
+	case MsgTypeHandshake:
+		if pkt.SenderID == m.LocalID {
+			_ = p.Conn.Close()
+			return
+		}
+
+		p.ID = pkt.SenderID
+		p.Name = pkt.Sender
+		m.peersMu.Lock()
+		if old, exists := m.peers[p.ID]; exists && old != p {
+			_ = old.Conn.Close()
+		}
+		m.peers[p.ID] = p
+		m.peersMu.Unlock()
+
+		if m.events.OnPeerJoin != nil {
+			m.events.OnPeerJoin(p.ID, p.Name, p.RemoteIP)
+		}
+
+	case MsgTypeChat:
+		if m.events.OnMessage != nil {
+			m.events.OnMessage(pkt.SenderID, pkt.Sender, pkt.Content, pkt.Timestamp)
+		}
+
+	case MsgTypeClipboard:
+		_ = system.WriteClipboard(pkt.Content)
+		if m.events.OnSystemMsg != nil {
+			m.events.OnSystemMsg(fmt.Sprintf("📋 Clipboard synced from %s (%d chars)", pkt.Sender, len(pkt.Content)))
+		}
+
+	case MsgTypeBatteryReq:
+		if info, err := system.GetBatteryInfo(); err == nil {
+			data, _ := json.Marshal(info)
+			_ = m.sendToPeer(p, &Packet{
+				Type:      MsgTypeBatteryResp,
+				SenderID:  m.LocalID,
+				Sender:    m.LocalName,
+				Timestamp: time.Now(),
+				ExtraData: string(data),
+			})
+		}
+
+	case MsgTypeBatteryResp:
+		var info system.BatteryInfo
+		if err := json.Unmarshal([]byte(pkt.ExtraData), &info); err == nil && m.events.OnBattery != nil {
+			m.events.OnBattery(pkt.Sender, info)
+		}
+
+	case MsgTypeNotify:
+		_ = system.SendNotification(fmt.Sprintf("TermChat from %s", pkt.Sender), pkt.Content)
+
+	case MsgTypeRing:
+		_ = system.TriggerRing()
+		if m.events.OnSystemMsg != nil {
+			m.events.OnSystemMsg(fmt.Sprintf("🔔 %s triggered your device alert/ring!", pkt.Sender))
+		}
+
+	case MsgTypeOpenUrl:
+		_ = system.OpenURL(pkt.URL)
+		if m.events.OnSystemMsg != nil {
+			m.events.OnSystemMsg(fmt.Sprintf("🌐 %s opened URL: %s", pkt.Sender, pkt.URL))
+		}
+
+	case MsgTypeMedia:
+		result, err := system.MediaControl(pkt.Action)
+		msg := result
+		if err != nil {
+			msg = fmt.Sprintf("❌ Media control: %v", err)
+		}
+		if m.events.OnSystemMsg != nil {
+			m.events.OnSystemMsg(fmt.Sprintf("%s (%s)", msg, pkt.Sender))
+		}
+
+	case MsgTypeExecReq:
+		out, err := system.ExecuteCommand(pkt.Content)
+		isErr := false
+		if err != nil {
+			isErr = true
+			out = fmt.Sprintf("Error: %v\n%s", err, out)
+		}
+		_ = m.sendToPeer(p, &Packet{
+			Type:      MsgTypeExecResp,
+			SenderID:  m.LocalID,
+			Sender:    m.LocalName,
+			Timestamp: time.Now(),
+			Content:   out,
+			ExtraData: pkt.Content,
+			Error:     fmt.Sprintf("%t", isErr),
+		})
+
+	case MsgTypeExecResp:
+		isErr := pkt.Error == "true"
+		if m.events.OnExecOutput != nil {
+			m.events.OnExecOutput(pkt.Sender, pkt.ExtraData, pkt.Content, isErr)
+		}
+
+	case MsgTypeFileOffer:
+		m.handleFileOffer(p, pkt)
+
+	case MsgTypeFileChunk:
+		m.handleFileChunk(p, pkt)
+
+	case MsgTypeFileDone:
+		m.handleFileDone(p, pkt)
+
+	case MsgTypeFileCancel:
+		m.handleFileCancel(p, pkt)
+	}
+}
+
+func (m *Manager) handleFileOffer(p *PeerConnection, pkt *Packet) {
+	safeName := filepath.Base(pkt.FileName)
+	if safeName == "" || safeName == "." || safeName == "/" {
+		safeName = "received_file"
+	}
+
+	targetPath := getUniqueFilePath(m.DownloadDir, safeName)
+	tempPath := targetPath + ".part"
+
+	tmpFile, err := os.Create(tempPath)
+	if err != nil {
+		if m.events.OnSystemMsg != nil {
+			m.events.OnSystemMsg(fmt.Sprintf("❌ Error creating file: %v", err))
+		}
+		return
+	}
+
+	state := &incomingFileState{
+		fileID:     pkt.FileID,
+		fileName:   safeName,
+		fileSize:   pkt.FileSize,
+		senderName: pkt.Sender,
+		tempFile:   tmpFile,
+		written:    0,
+		targetPath: targetPath,
+	}
+
+	m.incomingMu.Lock()
+	m.incomingMap[pkt.FileID] = state
+	m.incomingMu.Unlock()
+
+	if m.events.OnFileProgress != nil {
+		m.events.OnFileProgress(FileTransferProgress{
+			FileID:     pkt.FileID,
+			FileName:   safeName,
+			TotalBytes: pkt.FileSize,
+			DoneBytes:  0,
+			IsIncoming: true,
+			IsDone:     false,
+		})
+	}
+}
+
+func (m *Manager) handleFileChunk(p *PeerConnection, pkt *Packet) {
+	m.incomingMu.Lock()
+	state, exists := m.incomingMap[pkt.FileID]
+	m.incomingMu.Unlock()
+
+	if !exists || state.tempFile == nil {
+		return
+	}
+
+	data, err := base64.StdEncoding.DecodeString(pkt.ChunkData)
+	if err != nil {
+		return
+	}
+
+	n, err := state.tempFile.Write(data)
+	if err != nil {
+		return
+	}
+	state.written += int64(n)
+
+	if m.events.OnFileProgress != nil {
+		m.events.OnFileProgress(FileTransferProgress{
+			FileID:     pkt.FileID,
+			FileName:   state.fileName,
+			TotalBytes: state.fileSize,
+			DoneBytes:  state.written,
+			IsIncoming: true,
+			IsDone:     false,
+		})
+	}
+}
+
+func (m *Manager) handleFileDone(p *PeerConnection, pkt *Packet) {
+	m.incomingMu.Lock()
+	state, exists := m.incomingMap[pkt.FileID]
+	delete(m.incomingMap, pkt.FileID)
+	m.incomingMu.Unlock()
+
+	if !exists || state.tempFile == nil {
+		return
+	}
+
+	_ = state.tempFile.Close()
+	tempPath := state.tempFile.Name()
+	_ = os.Rename(tempPath, state.targetPath)
+
+	if m.events.OnFileProgress != nil {
+		m.events.OnFileProgress(FileTransferProgress{
+			FileID:     pkt.FileID,
+			FileName:   state.fileName,
+			TotalBytes: state.fileSize,
+			DoneBytes:  state.written,
+			IsIncoming: true,
+			IsDone:     true,
+			SavedPath:  state.targetPath,
+		})
+	}
+
+	if m.events.OnFileReceived != nil {
+		m.events.OnFileReceived(state.fileName, state.targetPath, state.written, state.senderName)
+	}
+}
+
+func (m *Manager) handleFileCancel(p *PeerConnection, pkt *Packet) {
+	m.incomingMu.Lock()
+	state, exists := m.incomingMap[pkt.FileID]
+	delete(m.incomingMap, pkt.FileID)
+	m.incomingMu.Unlock()
+
+	if exists && state.tempFile != nil {
+		_ = state.tempFile.Close()
+		_ = os.Remove(state.tempFile.Name())
+	}
+}
+
+func (m *Manager) ConnectRelay(relayURL, roomName string) {
+	if relayURL == "" {
+		return
+	}
+	m.RelayURL = relayURL
+	m.RoomName = roomName
+
+	go func() {
+		for {
+			select {
+			case <-m.ctx.Done():
+				return
+			default:
+			}
+
+			u := fmt.Sprintf("%s?room=%s&name=%s&id=%s", relayURL, roomName, m.LocalName, m.LocalID)
+			if !strings.HasPrefix(u, "ws://") && !strings.HasPrefix(u, "wss://") {
+				u = "wss://" + u
+			}
+
+			conn, _, err := websocket.DefaultDialer.Dial(u, nil)
+			if err != nil {
+				if m.events.OnSystemMsg != nil {
+					m.events.OnSystemMsg(fmt.Sprintf("☁️ Cloud Relay connecting to room #%s...", roomName))
+				}
+				time.Sleep(5 * time.Second)
+				continue
+			}
+
+			m.relayMu.Lock()
+			m.relayConn = conn
+			m.relayMu.Unlock()
+
+			if m.events.OnSystemMsg != nil {
+				m.events.OnSystemMsg(fmt.Sprintf("☁️ Connected to Cloud Room #%s (24/7 Global)", roomName))
+			}
+
+			// Read loop from relay
+			for {
+				_, data, err := conn.ReadMessage()
+				if err != nil {
+					break
+				}
+				pkt, err := DecodePacket(data)
+				if err != nil {
+					continue
+				}
+				if pkt.SenderID == m.LocalID {
+					continue
+				}
+				m.handlePacket(&PeerConnection{ID: pkt.SenderID, Name: pkt.Sender, RemoteIP: "cloud-relay"}, pkt)
+			}
+
+			m.relayMu.Lock()
+			m.relayConn = nil
+			m.relayMu.Unlock()
+
+			time.Sleep(3 * time.Second)
+		}
+	}()
+}
+
+func (m *Manager) SendPacket(p *Packet) error {
+	data, err := EncodePacket(p)
+	if err != nil {
+		return err
+	}
+
+	sentCount := 0
+
+	// 1. Send to Cloud Relay if connected
+	m.relayMu.Lock()
+	if m.relayConn != nil {
+		_ = m.relayConn.WriteMessage(websocket.TextMessage, data)
+		sentCount++
+	}
+	m.relayMu.Unlock()
+
+	// 2. Send to direct LAN TCP peers
+	m.peersMu.RLock()
+	for _, peer := range m.peers {
+		_ = m.sendToPeer(peer, p)
+		sentCount++
+	}
+	m.peersMu.RUnlock()
+
+	if sentCount == 0 {
+		return fmt.Errorf("no connected peers or cloud relay")
+	}
+
+	return nil
+}
+
+func (m *Manager) SendChat(text string) error {
+	p := &Packet{
+		Type:      MsgTypeChat,
+		SenderID:  m.LocalID,
+		Sender:    m.LocalName,
+		Timestamp: time.Now(),
+		Content:   text,
+	}
+
+	// Encrypt if passphrase is configured
+	if m.EncryptionKey != nil {
+		rawJSON, _ := json.Marshal(p)
+		encryptedText, err := system.Encrypt(string(rawJSON), m.EncryptionKey)
+		if err == nil {
+			p = &Packet{
+				Type:      MsgTypeEncrypted,
+				SenderID:  m.LocalID,
+				Sender:    m.LocalName,
+				Timestamp: time.Now(),
+				Content:   encryptedText,
+			}
+		}
+	}
+
+	return m.SendPacket(p)
+}
+
+func (m *Manager) SendBotChat(botName, text string) error {
+	p := &Packet{
+		Type:      MsgTypeChat,
+		SenderID:  "agy-bot",
+		Sender:    botName,
+		Timestamp: time.Now(),
+		Content:   text,
+	}
+	return m.SendPacket(p)
+}
+
+func (m *Manager) SendFile(filePath string) error {
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		return fmt.Errorf("cannot access file: %w", err)
+	}
+	if fileInfo.IsDir() {
+		return fmt.Errorf("directories cannot be sent directly; please compress first")
+	}
+
+	m.peersMu.RLock()
+	peersCount := len(m.peers)
+	peersList := make([]*PeerConnection, 0, peersCount)
+	for _, p := range m.peers {
+		peersList = append(peersList, p)
+	}
+	m.peersMu.RUnlock()
+
+	if peersCount == 0 {
+		return fmt.Errorf("no connected peers to send file to")
+	}
+
+	fileID := GenerateID()
+	fileName := filepath.Base(filePath)
+	fileSize := fileInfo.Size()
+
+	go func() {
+		file, err := os.Open(filePath)
+		if err != nil {
+			if m.events.OnSystemMsg != nil {
+				m.events.OnSystemMsg(fmt.Sprintf("❌ Error opening file: %v", err))
+			}
+			return
+		}
+		defer file.Close()
+
+		offer := &Packet{
+			Type:      MsgTypeFileOffer,
+			SenderID:  m.LocalID,
+			Sender:    m.LocalName,
+			Timestamp: time.Now(),
+			FileID:    fileID,
+			FileName:  fileName,
+			FileSize:  fileSize,
+		}
+		for _, peer := range peersList {
+			_ = m.sendToPeer(peer, offer)
+		}
+
+		if m.events.OnFileProgress != nil {
+			m.events.OnFileProgress(FileTransferProgress{
+				FileID:     fileID,
+				FileName:   fileName,
+				TotalBytes: fileSize,
+				DoneBytes:  0,
+				IsIncoming: false,
+				IsDone:     false,
+			})
+		}
+
+		buf := make([]byte, ChunkSize)
+		var totalSent int64
+		chunkIdx := 0
+
+		for {
+			select {
+			case <-m.ctx.Done():
+				return
+			default:
+			}
+
+			n, readErr := file.Read(buf)
+			if n > 0 {
+				chunkBase64 := base64.StdEncoding.EncodeToString(buf[:n])
+				totalSent += int64(n)
+				isLast := (readErr == io.EOF)
+
+				chunkPkt := &Packet{
+					Type:       MsgTypeFileChunk,
+					SenderID:   m.LocalID,
+					Sender:     m.LocalName,
+					FileID:     fileID,
+					ChunkIndex: chunkIdx,
+					ChunkData:  chunkBase64,
+					IsLast:     isLast,
+				}
+
+				for _, peer := range peersList {
+					_ = m.sendToPeer(peer, chunkPkt)
+				}
+
+				chunkIdx++
+
+				if m.events.OnFileProgress != nil {
+					m.events.OnFileProgress(FileTransferProgress{
+						FileID:     fileID,
+						FileName:   fileName,
+						TotalBytes: fileSize,
+						DoneBytes:  totalSent,
+						IsIncoming: false,
+						IsDone:     false,
+					})
+				}
+
+				time.Sleep(2 * time.Millisecond)
+			}
+
+			if readErr != nil {
+				break
+			}
+		}
+
+		donePkt := &Packet{
+			Type:      MsgTypeFileDone,
+			SenderID:  m.LocalID,
+			Sender:    m.LocalName,
+			FileID:    fileID,
+			FileName:  fileName,
+			FileSize:  fileSize,
+		}
+		for _, peer := range peersList {
+			_ = m.sendToPeer(peer, donePkt)
+		}
+
+		if m.events.OnFileProgress != nil {
+			m.events.OnFileProgress(FileTransferProgress{
+				FileID:     fileID,
+				FileName:   fileName,
+				TotalBytes: fileSize,
+				DoneBytes:  fileSize,
+				IsIncoming: false,
+				IsDone:     true,
+			})
+		}
+
+		if m.events.OnSystemMsg != nil {
+			m.events.OnSystemMsg(fmt.Sprintf("📤 Finished sending '%s' (%s)", fileName, FormatBytes(fileSize)))
+		}
+	}()
+
+	return nil
+}
+
+func (m *Manager) sendToPeer(peer *PeerConnection, p *Packet) error {
+	data, err := EncodePacket(p)
+	if err != nil {
+		return err
+	}
+
+	peer.writeMu.Lock()
+	defer peer.writeMu.Unlock()
+
+	_, err = peer.Writer.Write(data)
+	if err != nil {
+		return err
+	}
+	return peer.Writer.Flush()
+}
+
+func (m *Manager) GetPeers() []PeerConnection {
+	m.peersMu.RLock()
+	defer m.peersMu.RUnlock()
+
+	list := make([]PeerConnection, 0, len(m.peers))
+	for _, p := range m.peers {
+		list = append(list, *p)
+	}
+	return list
+}
+
+func getUniqueFilePath(dir, baseName string) string {
+	target := filepath.Join(dir, baseName)
+	if _, err := os.Stat(target); os.IsNotExist(err) {
+		return target
+	}
+
+	ext := filepath.Ext(baseName)
+	nameWithoutExt := strings.TrimSuffix(baseName, ext)
+	counter := 1
+
+	for {
+		newTarget := filepath.Join(dir, fmt.Sprintf("%s (%d)%s", nameWithoutExt, counter, ext))
+		if _, err := os.Stat(newTarget); os.IsNotExist(err) {
+			return newTarget
+		}
+		counter++
+	}
+}
+
+func FormatBytes(b int64) string {
+	const unit = 1024
+	if b < unit {
+		return fmt.Sprintf("%d B", b)
+	}
+	div, exp := int64(unit), 0
+	for n := b / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
