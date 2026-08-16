@@ -12,7 +12,27 @@ import (
 	"time"
 )
 
-const AppVersion = "v1.1.0"
+const AppVersion = "v1.2.0"
+
+type progressWriter struct {
+	total      int64
+	current    int64
+	onProgress func(string)
+	lastReport time.Time
+}
+
+func (pw *progressWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	pw.current += int64(n)
+	if time.Since(pw.lastReport) > 500*time.Millisecond || pw.current == pw.total {
+		pw.lastReport = time.Now()
+		if pw.onProgress != nil && pw.total > 0 {
+			pct := int((float64(pw.current) / float64(pw.total)) * 100)
+			pw.onProgress(fmt.Sprintf("[NET] Downloading update: %d%% (%.1f / %.1f MB)...", pct, float64(pw.current)/(1024*1024), float64(pw.total)/(1024*1024)))
+		}
+	}
+	return n, nil
+}
 
 func getPlatformBinaryName() string {
 	goos := runtime.GOOS
@@ -152,7 +172,12 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 		_ = os.Remove(tmpPath)
 	}()
 
-	_, err = io.Copy(tmpFile, resp.Body)
+	pw := &progressWriter{
+		total:      totalSize,
+		onProgress: onProgress,
+	}
+	destWriter := io.MultiWriter(tmpFile, pw)
+	_, err = io.Copy(destWriter, resp.Body)
 	_ = tmpFile.Close()
 	if err != nil {
 		return "", fmt.Errorf("error writing download: %w", err)
