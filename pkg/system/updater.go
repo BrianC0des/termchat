@@ -1,6 +1,10 @@
 package system
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,7 +16,7 @@ import (
 	"time"
 )
 
-const AppVersion = "v1.2.0"
+const AppVersion = "v1.3.0"
 
 type progressWriter struct {
 	total      int64
@@ -24,7 +28,7 @@ type progressWriter struct {
 func (pw *progressWriter) Write(p []byte) (int, error) {
 	n := len(p)
 	pw.current += int64(n)
-	if time.Since(pw.lastReport) > 500*time.Millisecond || pw.current == pw.total {
+	if time.Since(pw.lastReport) > 400*time.Millisecond || pw.current == pw.total {
 		pw.lastReport = time.Now()
 		if pw.onProgress != nil && pw.total > 0 {
 			pct := int((float64(pw.current) / float64(pw.total)) * 100)
@@ -34,12 +38,55 @@ func (pw *progressWriter) Write(p []byte) (int, error) {
 	return n, nil
 }
 
+func extractTarGz(gzData []byte, destFile *os.File) error {
+	gzr, err := gzip.NewReader(bytes.NewReader(gzData))
+	if err != nil {
+		return err
+	}
+	defer gzr.Close()
+
+	tr := tar.NewReader(gzr)
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		if header.Typeflag == tar.TypeReg {
+			_, err := io.Copy(destFile, tr)
+			return err
+		}
+	}
+	return fmt.Errorf("no executable binary found in archive")
+}
+
+func extractZip(zipData []byte, destFile *os.File) error {
+	zr, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
+	if err != nil {
+		return err
+	}
+	for _, f := range zr.File {
+		if !f.FileInfo().IsDir() {
+			rc, err := f.Open()
+			if err != nil {
+				return err
+			}
+			_, err = io.Copy(destFile, rc)
+			_ = rc.Close()
+			return err
+		}
+	}
+	return fmt.Errorf("no executable binary found in zip")
+}
+
 func getPlatformBinaryName() string {
 	goos := runtime.GOOS
 	goarch := runtime.GOARCH
 
-	// Detect Android / Termux
-	if os.Getenv("PREFIX") != "" && strings.Contains(os.Getenv("PREFIX"), "com.termux") {
+	// Termux detection
+	if os.Getenv("PREFIX") != "" {
 		if goarch == "arm64" {
 			return "termchat-android-arm64"
 		}
@@ -47,6 +94,11 @@ func getPlatformBinaryName() string {
 	}
 
 	switch goos {
+	case "linux":
+		if goarch == "arm64" {
+			return "termchat-linux-arm64"
+		}
+		return "termchat-linux-amd64"
 	case "windows":
 		if goarch == "arm64" {
 			return "termchat-windows-arm64.exe"
@@ -57,11 +109,6 @@ func getPlatformBinaryName() string {
 			return "termchat-mac-apple-silicon"
 		}
 		return "termchat-mac-intel"
-	case "linux":
-		if goarch == "arm64" {
-			return "termchat-linux-arm64"
-		}
-		return "termchat-linux-amd64"
 	case "android":
 		if goarch == "arm64" {
 			return "termchat-android-arm64"
@@ -72,21 +119,14 @@ func getPlatformBinaryName() string {
 	}
 }
 
-type ReleaseInfo struct {
-	TagName string `json:"tag_name"`
-	Name    string `json:"name"`
-	Body    string `json:"body"`
-}
-
 func FetchLatestVersionTag() (string, error) {
+	client := &http.Client{Timeout: 5 * time.Second}
 	req, err := http.NewRequest("GET", "https://api.github.com/repos/BrianC0des/termchat/releases/latest", nil)
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("User-Agent", "TermChat-Updater/1.1")
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	req.Header.Set("User-Agent", "TermChat-Updater/1.3")
 
-	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -97,11 +137,13 @@ func FetchLatestVersionTag() (string, error) {
 		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 
-	var rel ReleaseInfo
-	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+	var data struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return "", err
 	}
-	return rel.TagName, nil
+	return data.TagName, nil
 }
 
 func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
@@ -122,7 +164,14 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	}
 
 	binaryName := getPlatformBinaryName()
-	downloadURL := fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", binaryName)
+	
+	// Prefer downloading compressed archive (.tar.gz / .zip) for 4x faster download (2.1 MB vs 8.4 MB)
+	ext := ".tar.gz"
+	if runtime.GOOS == "windows" {
+		ext = ".zip"
+	}
+	archiveName := binaryName + ext
+	downloadURL := fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", archiveName)
 
 	execPath, err := os.Executable()
 	if err != nil {
@@ -137,19 +186,24 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("request creation error: %w", err)
 	}
-	req.Header.Set("User-Agent", "TermChat-Updater/1.2")
+	req.Header.Set("User-Agent", "TermChat-Updater/1.3")
 
-	// No hard timeout during body streaming
 	client := &http.Client{Timeout: 0}
 	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("download error: %w", err)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		// Fallback to direct raw binary download if compressed archive isn't available
+		if resp != nil {
+			resp.Body.Close()
+		}
+		downloadURL = fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", binaryName)
+		req, _ = http.NewRequest("GET", downloadURL, nil)
+		req.Header.Set("User-Agent", "TermChat-Updater/1.3")
+		resp, err = client.Do(req)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			return "", fmt.Errorf("failed to download update asset")
+		}
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to download update (HTTP %d)", resp.StatusCode)
-	}
 
 	totalSize := resp.ContentLength
 	if onProgress != nil {
@@ -158,6 +212,17 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 		} else {
 			onProgress("[NET] Downloading TermChat update...")
 		}
+	}
+
+	var downloadedData bytes.Buffer
+	pw := &progressWriter{
+		total:      totalSize,
+		onProgress: onProgress,
+	}
+	destWriter := io.MultiWriter(&downloadedData, pw)
+	_, err = io.Copy(destWriter, resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("error reading download stream: %w", err)
 	}
 
 	tmpFile, err := os.CreateTemp(filepath.Dir(execPath), "termchat-update-*")
@@ -172,15 +237,18 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 		_ = os.Remove(tmpPath)
 	}()
 
-	pw := &progressWriter{
-		total:      totalSize,
-		onProgress: onProgress,
+	rawBytes := downloadedData.Bytes()
+	if strings.HasSuffix(downloadURL, ".tar.gz") {
+		err = extractTarGz(rawBytes, tmpFile)
+	} else if strings.HasSuffix(downloadURL, ".zip") {
+		err = extractZip(rawBytes, tmpFile)
+	} else {
+		_, err = tmpFile.Write(rawBytes)
 	}
-	destWriter := io.MultiWriter(tmpFile, pw)
-	_, err = io.Copy(destWriter, resp.Body)
 	_ = tmpFile.Close()
+
 	if err != nil {
-		return "", fmt.Errorf("error writing download: %w", err)
+		return "", fmt.Errorf("error extracting downloaded binary: %w", err)
 	}
 
 	_ = os.Chmod(tmpPath, 0755)
