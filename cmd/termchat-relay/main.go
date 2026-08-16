@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -203,7 +204,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		host = r.Header.Get("X-Forwarded-Host")
 	}
 
-	downloadURL := fmt.Sprintf("%s://%s/files/%s/%s", proto, host, fileID, cleanName)
+	downloadURL := fmt.Sprintf("%s://%s/files/%s/%s", proto, host, fileID, url.PathEscape(cleanName))
 
 	resp := map[string]interface{}{
 		"id":       fileID,
@@ -217,23 +218,46 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
-	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/files/"), "/")
-	if len(parts) < 2 {
+	unescapedPath, err := url.PathUnescape(r.URL.Path)
+	if err != nil {
+		unescapedPath = r.URL.Path
+	}
+	parts := strings.Split(strings.TrimPrefix(unescapedPath, "/files/"), "/")
+	if len(parts) < 1 {
 		http.NotFound(w, r)
 		return
 	}
 
 	fileID := parts[0]
-	fileName := parts[1]
-	filePath := filepath.Join(s.uploadDir, fileID, fileName)
+	dirPath := filepath.Join(s.uploadDir, fileID)
 
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+	var targetFile string
+	var fileName string
+
+	if len(parts) >= 2 {
+		fileName = parts[1]
+		filePath := filepath.Join(dirPath, fileName)
+		if _, err := os.Stat(filePath); err == nil {
+			targetFile = filePath
+		}
+	}
+
+	// Fallback: If not matched by exact name, find whatever file was uploaded in that fileID folder
+	if targetFile == "" {
+		entries, err := os.ReadDir(dirPath)
+		if err == nil && len(entries) > 0 {
+			targetFile = filepath.Join(dirPath, entries[0].Name())
+			fileName = entries[0].Name()
+		}
+	}
+
+	if targetFile == "" {
 		http.NotFound(w, r)
 		return
 	}
 
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", fileName))
-	http.ServeFile(w, r, filePath)
+	http.ServeFile(w, r, targetFile)
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {

@@ -13,6 +13,7 @@ import (
 	"mime/multipart"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -874,7 +875,20 @@ func (m *Manager) UploadFileToRelay(filePath string) (string, string, int64, err
 }
 
 func (m *Manager) DownloadFileFromURL(fileURL string) (string, error) {
-	resp, err := http.Get(fileURL)
+	// Clean and parse URL
+	u, err := url.Parse(fileURL)
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequest("GET", u.String(), nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", "TermChat-Client/1.1")
+
+	client := &http.Client{Timeout: 0}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -884,7 +898,10 @@ func (m *Manager) DownloadFileFromURL(fileURL string) (string, error) {
 		return "", fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}
 
-	fileName := filepath.Base(fileURL)
+	fileName := filepath.Base(u.Path)
+	if unescaped, err := url.PathUnescape(fileName); err == nil && unescaped != "" {
+		fileName = unescaped
+	}
 	if idx := strings.Index(fileName, "?"); idx != -1 {
 		fileName = fileName[:idx]
 	}
