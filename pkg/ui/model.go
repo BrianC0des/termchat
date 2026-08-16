@@ -502,7 +502,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !m.filePicker.Active {
 		m.textInput, tiCmd = m.textInput.Update(msg)
 	}
-	m.viewport, vpCmd = m.viewport.Update(msg)
+
+	// Only forward non-KeyMsg events (like mouse wheel scroll or window resize) to viewport
+	// to prevent typing keys ('j', 'k', arrows) from accidentally scrolling the chat view
+	if _, isKey := msg.(tea.KeyMsg); !isKey {
+		m.viewport, vpCmd = m.viewport.Update(msg)
+	}
 
 	cmds = append(cmds, tiCmd, vpCmd)
 	return m, tea.Batch(cmds...)
