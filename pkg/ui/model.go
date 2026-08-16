@@ -63,7 +63,16 @@ type Model struct {
 	pinnedMsgs   []ChatMessage
 	userStatuses map[string]string
 	myStatus     string
+	sidebarMode  SidebarMode
 }
+
+type SidebarMode int
+
+const (
+	SidebarNormal SidebarMode = iota
+	SidebarWide
+	SidebarHidden
+)
 
 // Custom Tea Messages
 type incomingMsg struct {
@@ -293,6 +302,37 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showMembersDropdown = !m.showMembersDropdown
 			return m, nil
 
+		case tea.KeyF3, tea.KeyCtrlB:
+			switch m.sidebarMode {
+			case SidebarNormal:
+				m.sidebarMode = SidebarWide
+				m.addSystemMsg("📐 Sidebar expanded (Wide Mode: 34 cols)")
+			case SidebarWide:
+				m.sidebarMode = SidebarHidden
+				m.addSystemMsg("📐 Sidebar hidden (Zen Mode: Fullscreen Chat)")
+			case SidebarHidden:
+				m.sidebarMode = SidebarNormal
+				m.addSystemMsg("📐 Sidebar restored (Normal Mode: 22 cols)")
+			}
+			m.recalculateViewport()
+			return m, nil
+
+		case tea.KeyPgUp:
+			m.viewport.HalfViewUp()
+			return m, nil
+
+		case tea.KeyPgDown:
+			m.viewport.HalfViewDown()
+			return m, nil
+
+		case tea.KeyCtrlU:
+			m.viewport.HalfViewUp()
+			return m, nil
+
+		case tea.KeyCtrlD:
+			m.viewport.HalfViewDown()
+			return m, nil
+
 		case tea.KeyCtrlF:
 			m.refreshSharedFiles()
 			m.showFilesModal = !m.showFilesModal
@@ -332,33 +372,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-
-		headerHeight := 4
-		inputHeight := 3
-		transferHeight := 0
-		if len(m.transfers) > 0 {
-			transferHeight = 2
-		}
-
-		vpHeight := m.height - headerHeight - inputHeight - transferHeight - 2
-		if vpHeight < 4 {
-			vpHeight = 4
-		}
-
-		vpWidth := m.width - 2
-		if m.width >= 70 {
-			vpWidth = m.width - 24 // Account for sidebar
-		}
-
-		if !m.ready {
-			m.viewport = viewport.New(vpWidth, vpHeight)
-			m.viewport.SetContent(m.renderMessages())
-			m.ready = true
-		} else {
-			m.viewport.Width = vpWidth
-			m.viewport.Height = vpHeight
-			m.viewport.SetContent(m.renderMessages())
-		}
+		m.recalculateViewport()
 		m.textInput.Width = m.width - 10
 		m.viewport.GotoBottom()
 
@@ -837,7 +851,36 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			return
 		}
 		m.pinnedMsgs = append(m.pinnedMsgs[:idx-1], m.pinnedMsgs[idx:]...)
-		m.addSystemMsg(fmt.Sprintf("📌 Removed pinned message #%d.", idx))
+	case "/sidebar", "/sb":
+		if len(parts) < 2 {
+			switch m.sidebarMode {
+			case SidebarNormal:
+				m.sidebarMode = SidebarWide
+				m.addSystemMsg("📐 Sidebar expanded (Wide Mode: 34 cols)")
+			case SidebarWide:
+				m.sidebarMode = SidebarHidden
+				m.addSystemMsg("📐 Sidebar hidden (Zen Mode: Fullscreen Chat)")
+			case SidebarHidden:
+				m.sidebarMode = SidebarNormal
+				m.addSystemMsg("📐 Sidebar restored (Normal Mode: 22 cols)")
+			}
+		} else {
+			modeArg := strings.ToLower(parts[1])
+			switch modeArg {
+			case "wide", "expand", "max":
+				m.sidebarMode = SidebarWide
+				m.addSystemMsg("📐 Sidebar set to Wide Mode (34 cols)")
+			case "hide", "hidden", "off", "zen":
+				m.sidebarMode = SidebarHidden
+				m.addSystemMsg("📐 Sidebar hidden (Zen Mode: Fullscreen Chat)")
+			case "normal", "show", "on", "default":
+				m.sidebarMode = SidebarNormal
+				m.addSystemMsg("📐 Sidebar set to Normal Mode (22 cols)")
+			default:
+				m.addSystemMsg("Usage: /sidebar [normal | wide | hide | toggle]")
+			}
+		}
+		m.recalculateViewport()
 
 	case "/paste", "/p":
 		clipText, err := system.ReadClipboard()
@@ -1504,6 +1547,46 @@ func (m *Model) refreshSharedFiles() {
 	}
 	if m.selectedFileIdx < 0 {
 		m.selectedFileIdx = 0
+	}
+}
+
+func (m *Model) recalculateViewport() {
+	headerHeight := 4
+	inputHeight := 3
+	transferHeight := 0
+	if len(m.transfers) > 0 {
+		transferHeight = 2
+	}
+
+	vpHeight := m.height - headerHeight - inputHeight - transferHeight - 2
+	if vpHeight < 4 {
+		vpHeight = 4
+	}
+
+	vpWidth := m.width - 2
+	if m.width >= 70 {
+		switch m.sidebarMode {
+		case SidebarNormal:
+			vpWidth = m.width - 24
+		case SidebarWide:
+			vpWidth = m.width - 36
+		case SidebarHidden:
+			vpWidth = m.width - 2
+		}
+	}
+
+	if vpWidth < 20 {
+		vpWidth = 20
+	}
+
+	if !m.ready {
+		m.viewport = viewport.New(vpWidth, vpHeight)
+		m.viewport.SetContent(m.renderMessages())
+		m.ready = true
+	} else {
+		m.viewport.Width = vpWidth
+		m.viewport.Height = vpHeight
+		m.viewport.SetContent(m.renderMessages())
 	}
 }
 

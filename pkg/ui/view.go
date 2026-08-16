@@ -82,6 +82,15 @@ func (m *Model) View() string {
 		HelpKeyStyle.Render("F1"),
 		HelpDescStyle.Render(" Help"),
 		" ",
+		HelpKeyStyle.Render("F2"),
+		HelpDescStyle.Render(" Members"),
+		" ",
+		HelpKeyStyle.Render("F3"),
+		HelpDescStyle.Render(fmt.Sprintf(" Sidebar (%s)", m.getSidebarModeLabel())),
+		" ",
+		HelpKeyStyle.Render("^F"),
+		HelpDescStyle.Render(" Vault"),
+		" ",
 		HelpKeyStyle.Render("^O"),
 		HelpDescStyle.Render(" Files"),
 	)
@@ -95,13 +104,16 @@ func (m *Model) View() string {
 		lipgloss.JoinHorizontal(lipgloss.Top, headerLeft, strings.Repeat(" ", gap), headerRight),
 	)
 
-	// 3. Body (Sidebar + Chat or Single-Column for Mobile)
+	// 3. Body (Sidebar + Chat or Single-Column for Mobile / Zen mode)
 	var body string
-	if m.width >= 70 {
-		// Desktop two-column layout
-		sidebarContent := m.renderSidebar(peers)
+	if m.width >= 70 && m.sidebarMode != SidebarHidden {
+		sidebarWidth := 22
+		if m.sidebarMode == SidebarWide {
+			sidebarWidth = 34
+		}
+		sidebarContent := m.renderSidebar(peers, sidebarWidth)
 		sidebar := SidebarStyle.
-			Width(22).
+			Width(sidebarWidth).
 			Height(m.viewport.Height).
 			Render(sidebarContent)
 
@@ -112,9 +124,9 @@ func (m *Model) View() string {
 
 		body = lipgloss.JoinHorizontal(lipgloss.Top, sidebar, chatBox)
 	} else {
-		// Mobile narrow layout (Termux)
+		// Fullscreen / Mobile / Zen mode layout
 		body = ChatBoxStyle.
-			Width(m.width).
+			Width(m.viewport.Width).
 			Height(m.viewport.Height).
 			Render(m.viewport.View())
 	}
@@ -170,7 +182,18 @@ func (m *Model) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, layout...)
 }
 
-func (m *Model) renderSidebar(peers []network.PeerConnection) string {
+func (m *Model) getSidebarModeLabel() string {
+	switch m.sidebarMode {
+	case SidebarWide:
+		return "Wide"
+	case SidebarHidden:
+		return "Zen"
+	default:
+		return "Normal"
+	}
+}
+
+func (m *Model) renderSidebar(peers []network.PeerConnection, width int) string {
 	var sb strings.Builder
 
 	totalCount := len(peers) + 1
@@ -187,14 +210,22 @@ func (m *Model) renderSidebar(peers []network.PeerConnection) string {
 	if m.showMembersDropdown {
 		// Show Local User
 		myName := m.manager.LocalName
-		if len(myName) > 9 {
-			myName = myName[:7] + ".."
+		maxNameLen := 9
+		if width >= 30 {
+			maxNameLen = 14
+		}
+		if len(myName) > maxNameLen {
+			myName = myName[:maxNameLen-2] + ".."
 		}
 		statusStr := ""
 		if m.myStatus != "" {
 			statusStr = " " + m.myStatus
-			if len(statusStr) > 12 {
-				statusStr = statusStr[:10] + ".."
+			maxStatusLen := 10
+			if width >= 30 {
+				maxStatusLen = 14
+			}
+			if len(statusStr) > maxStatusLen {
+				statusStr = statusStr[:maxStatusLen-2] + ".."
 			}
 		}
 		sb.WriteString(fmt.Sprintf("%s %s %s%s\n",
@@ -213,12 +244,16 @@ func (m *Model) renderSidebar(peers []network.PeerConnection) string {
 				peerStatus := ""
 				if st, ok := m.userStatuses[p.Name]; ok && st != "" {
 					peerStatus = " " + st
-					if len(peerStatus) > 12 {
-						peerStatus = peerStatus[:10] + ".."
+					maxStatusLen := 10
+					if width >= 30 {
+						maxStatusLen = 14
+					}
+					if len(peerStatus) > maxStatusLen {
+						peerStatus = peerStatus[:maxStatusLen-2] + ".."
 					}
 				}
-				if len(peerName) > 11 {
-					peerName = peerName[:9] + ".."
+				if len(peerName) > maxNameLen {
+					peerName = peerName[:maxNameLen-2] + ".."
 				}
 				sb.WriteString(fmt.Sprintf("%s %s%s\n",
 					lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A")).Render("●"),
@@ -226,6 +261,28 @@ func (m *Model) renderSidebar(peers []network.PeerConnection) string {
 					lipgloss.NewStyle().Foreground(lipgloss.Color("#7AA2F7")).Render(peerStatus),
 				))
 			}
+		}
+	}
+
+	if width >= 30 {
+		// Wide Mode Extra Panels
+		if m.roomTopic != "" {
+			sb.WriteString("\n")
+			sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#E0AF68")).Render("TOPIC"))
+			sb.WriteString("\n")
+			topicSnippet := m.roomTopic
+			if len(topicSnippet) > 28 {
+				topicSnippet = topicSnippet[:25] + "..."
+			}
+			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#C0CAF5")).Render(topicSnippet))
+			sb.WriteString("\n")
+		}
+
+		if len(m.pinnedMsgs) > 0 {
+			sb.WriteString("\n")
+			sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#BB9AF7")).Render(fmt.Sprintf("PINS (%d)", len(m.pinnedMsgs))))
+			sb.WriteString("\n")
+			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Render("Type /pins to view all\n"))
 		}
 	}
 
@@ -246,8 +303,12 @@ func (m *Model) renderSidebar(peers []network.PeerConnection) string {
 	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7AA2F7")).Render("DOWNLOADS"))
 	sb.WriteString("\n")
 	dirStr := m.manager.DownloadDir
-	if len(dirStr) > 18 {
-		dirStr = "..." + dirStr[len(dirStr)-15:]
+	maxDirLen := 18
+	if width >= 30 {
+		maxDirLen = 28
+	}
+	if len(dirStr) > maxDirLen {
+		dirStr = "..." + dirStr[len(dirStr)-(maxDirLen-3):]
 	}
 	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Render(dirStr))
 
