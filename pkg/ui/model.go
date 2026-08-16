@@ -1130,7 +1130,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			m.showQR = true
 		}
 
-	case "/leave", "/offline":
+	case "/leave", "/offline", "/lan":
 		m.manager.LeaveRoom()
 		var roomMsgs []ChatMessage
 		history := system.LoadHistory("", 60)
@@ -1147,7 +1147,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		}
 		m.messages = roomMsgs
 		m.viewport.SetContent(m.renderMessages())
-		m.addSystemMsg("🏠 Switched to Offline Local Wi-Fi mode (Isolated LAN only).")
+		m.addSystemMsg("🏠 Switched to Offline Local Wi-Fi (LAN Direct Turbo Mode).")
 
 	case "/mode":
 		if len(parts) < 2 {
