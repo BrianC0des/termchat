@@ -32,6 +32,7 @@ func main() {
 	dirFlag := flag.String("dir", "", "Download directory for received files")
 	connectFlag := flag.String("connect", "", "Directly connect to a peer address (e.g. 192.168.1.50:7332)")
 	roomFlag := flag.String("room", "", "Secret Cloud Room name (e.g. -room secret-squad)")
+	passFlag := flag.String("pass", "", "Password / passphrase for AES-256 room encryption")
 	relayFlag := flag.String("relay", "wss://termchat-relay.fly.dev/ws", "Cloud Relay WebSocket URL")
 	flag.Parse()
 
@@ -45,6 +46,10 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to start TermChat: %v\n", err)
 		os.Exit(1)
+	}
+
+	if *passFlag != "" {
+		mgr.SetEncryptionPassphrase(*passFlag)
 	}
 
 	// 2. Initialize TUI Model

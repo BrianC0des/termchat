@@ -645,12 +645,16 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			m.showQR = true
 		}
 
-	case "/room", "/channel":
+	case "/room", "/create", "/join", "/channel":
 		if len(parts) < 2 {
 			if m.manager.RoomName != "" {
-				m.addSystemMsg(fmt.Sprintf("☁️ Currently in Cloud Room: #%s", m.manager.RoomName))
+				lockInfo := ""
+				if m.manager.EncryptionKey != nil {
+					lockInfo = " (🔒 Encrypted)"
+				}
+				m.addSystemMsg(fmt.Sprintf("☁️ Currently in Room: #%s%s", m.manager.RoomName, lockInfo))
 			} else {
-				m.addSystemMsg("Usage: /room <room_name> (e.g. /room secret-squad)")
+				m.addSystemMsg("Usage: /room <room_name> [optional_password]\nExample: /room squad secret123")
 			}
 			return
 		}
@@ -660,7 +664,15 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			relay = "wss://termchat-relay.fly.dev/ws"
 		}
 		m.manager.ConnectRelay(relay, newRoom)
-		m.addSystemMsg(fmt.Sprintf("☁️ Joining 24/7 Cloud Room #%s...", newRoom))
+
+		// If password is provided in the same command: /room <name> <password>
+		if len(parts) >= 3 {
+			pass := parts[2]
+			m.manager.SetEncryptionPassphrase(pass)
+			m.addSystemMsg(fmt.Sprintf("☁️ Joined Room #%s with 🔒 AES-256 Password Protection!", newRoom))
+		} else {
+			m.addSystemMsg(fmt.Sprintf("☁️ Joined Room #%s (Unencrypted. Use `/auth <pass>` to lock)", newRoom))
+		}
 
 	case "/clear":
 		m.messages = []ChatMessage{}
