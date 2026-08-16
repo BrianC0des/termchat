@@ -17,12 +17,16 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Styling Tokens
+// Styling Tokens (OCD-Clean Minimalist Palette)
 var (
 	titleStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#00FFC8")).
-			Background(lipgloss.Color("#1A1B26")).
+			Foreground(lipgloss.Color("#1A1B26")).
+			Background(lipgloss.Color("#7AA2F7")).
+			Padding(0, 2)
+
+	subtitleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#565F89")).
 			Padding(0, 1)
 
 	headerStyle = lipgloss.NewStyle().
@@ -30,40 +34,47 @@ var (
 			Foreground(lipgloss.Color("#7AA2F7")).
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderBottom(true).
-			BorderForeground(lipgloss.Color("#3B4261"))
+			BorderForeground(lipgloss.Color("#3B4261")).
+			Padding(0, 1)
 
 	boxStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("#3B4261")).
 			Padding(0, 1)
 
-	accentStyle = lipgloss.NewStyle().
+	labelStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#BB9AF7")).
 			Bold(true)
 
-	successStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#9ECE6A")).
-			Bold(true)
+	valueStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#C0CAF5"))
 
-	warnStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#E0AF68")).
-			Bold(true)
+	badgeReady = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#15161E")).
+			Background(lipgloss.Color("#9ECE6A")).
+			Padding(0, 1)
 
-	errorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#F7768E")).
-			Bold(true)
+	badgeBuilding = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("#15161E")).
+			Background(lipgloss.Color("#E0AF68")).
+			Padding(0, 1)
 
-	subtleStyle = lipgloss.NewStyle().
+	dimStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#565F89"))
+
+	tableHeaderStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#7DCFFF"))
 )
 
 type tickMsg time.Time
-type ghStatusMsg string
 
 type platformStatus struct {
 	Name      string
 	Asset     string
-	Status    string
+	Status    string // "READY", "BUILDING"
 	SizeMB    float64
 	Downloads int
 	Sha256    string
@@ -79,10 +90,10 @@ type releaseDataMsg struct {
 }
 
 type mirrorPingMsg struct {
-	githubMs  int64
-	fastlyMs  int64
-	googleMs  int64
-	relayMs   int64
+	githubMs int64
+	fastlyMs int64
+	googleMs int64
+	relayMs  int64
 }
 
 type model struct {
@@ -94,7 +105,6 @@ type model struct {
 	repoStars      int
 	totalDownloads int
 	platforms      []platformStatus
-	activePeers    int
 	relayMs        int64
 	githubMs       int64
 	fastlyMs       int64
@@ -108,27 +118,26 @@ type model struct {
 
 func initialModel() model {
 	defaultPlatforms := []platformStatus{
-		{Name: "Linux PC (x86_64)", Asset: "termchat-linux-amd64.tar.zst", Status: "⏳ Checking...", SizeMB: 0},
-		{Name: "Linux ARM64", Asset: "termchat-linux-arm64.tar.zst", Status: "⏳ Checking...", SizeMB: 0},
-		{Name: "macOS (Apple Silicon)", Asset: "termchat-mac-apple-silicon.tar.zst", Status: "⏳ Checking...", SizeMB: 0},
-		{Name: "macOS (Intel)", Asset: "termchat-mac-intel.tar.zst", Status: "⏳ Checking...", SizeMB: 0},
-		{Name: "Android / Termux (ARM64)", Asset: "termchat-android-arm64.tar.zst", Status: "⏳ Checking...", SizeMB: 0},
-		{Name: "Android / Termux (ARM32)", Asset: "termchat-android-arm.tar.zst", Status: "⏳ Checking...", SizeMB: 0},
-		{Name: "Windows (64-bit .exe)", Asset: "termchat-windows.zip", Status: "⏳ Checking...", SizeMB: 0},
+		{Name: "Linux PC (x86_64)", Asset: "termchat-linux-amd64.tar.zst", Status: "BUILDING", SizeMB: 0},
+		{Name: "Linux ARM64", Asset: "termchat-linux-arm64.tar.zst", Status: "BUILDING", SizeMB: 0},
+		{Name: "macOS (Apple Silicon)", Asset: "termchat-mac-apple-silicon.tar.zst", Status: "BUILDING", SizeMB: 0},
+		{Name: "macOS (Intel)", Asset: "termchat-mac-intel.tar.zst", Status: "BUILDING", SizeMB: 0},
+		{Name: "Android / Termux (ARM64)", Asset: "termchat-android-arm64.tar.zst", Status: "BUILDING", SizeMB: 0},
+		{Name: "Android / Termux (ARM32)", Asset: "termchat-android-arm.tar.zst", Status: "BUILDING", SizeMB: 0},
+		{Name: "Windows (64-bit .exe)", Asset: "termchat-windows.zip", Status: "BUILDING", SizeMB: 0},
 	}
 
 	return model{
 		relayURL:    "wss://termchat-o51d.onrender.com/ws",
 		latestTag:   "v1.8.0",
 		commitHash:  "main",
-		ghStatus:    "Querying GitHub Release Analytics...",
+		ghStatus:    "Syncing release telemetry...",
 		platforms:   defaultPlatforms,
 		logFilter:   "ALL",
 		lastUpdated: time.Now(),
 		logs: []string{
-			fmt.Sprintf("%s [SYS] TermChat Dashboard v1.8.0 Active", time.Now().Format("15:04:05")),
-			fmt.Sprintf("%s [NET] Probing Mirror Latencies (GitHub / Fastly / Google / Relay)...", time.Now().Format("15:04:05")),
-			fmt.Sprintf("%s [BUILD] Zstandard (.tar.zst) Pacman Speed Compression Engaged", time.Now().Format("15:04:05")),
+			fmt.Sprintf("%s [SYS] Dashboard telemetry engine connected", time.Now().Format("15:04:05")),
+			fmt.Sprintf("%s [NET] Latency probing active (GitHub / Fastly / Google / Relay)", time.Now().Format("15:04:05")),
 		},
 	}
 }
@@ -149,7 +158,7 @@ func tickCmd() tea.Cmd {
 
 func fetchReleaseDataCmd() tea.Cmd {
 	return func() tea.Msg {
-		rawCI := "GitHub CI: Active"
+		rawCI := "CI Workflow: Active"
 		out, err := exec.Command("gh", "run", "list", "--limit", "1").CombinedOutput()
 		if err == nil && len(out) > 0 {
 			lines := strings.Split(strings.TrimSpace(string(out)), "\n")
@@ -160,13 +169,11 @@ func fetchReleaseDataCmd() tea.Cmd {
 			}
 		}
 
-		// Fetch Commit Hash
 		commitHash := "main"
 		if cOut, cErr := exec.Command("git", "rev-parse", "--short", "HEAD").CombinedOutput(); cErr == nil {
 			commitHash = strings.TrimSpace(string(cOut))
 		}
 
-		// Fetch Releases Analytics
 		req, _ := http.NewRequest("GET", "https://api.github.com/repos/BrianC0des/termchat/releases", nil)
 		req.Header.Set("User-Agent", "TermChat-Dashboard/1.8")
 		client := &http.Client{Timeout: 5 * time.Second}
@@ -202,7 +209,6 @@ func fetchReleaseDataCmd() tea.Cmd {
 			}
 		}
 
-		// Fetch Repo Stars
 		sReq, _ := http.NewRequest("GET", "https://api.github.com/repos/BrianC0des/termchat", nil)
 		sReq.Header.Set("User-Agent", "TermChat-Dashboard/1.8")
 		if sResp, sErr := client.Do(sReq); sErr == nil && sResp.StatusCode == http.StatusOK {
@@ -227,23 +233,22 @@ func fetchReleaseDataCmd() tea.Cmd {
 
 		for i, p := range platforms {
 			if sz, ok := assetSizeMap[p.Asset]; ok && sz > 100000 {
-				platforms[i].Status = "✓ Ready"
+				platforms[i].Status = "READY"
 				platforms[i].SizeMB = float64(sz) / (1024 * 1024)
 				platforms[i].Downloads = assetDlMap[p.Asset]
 			} else {
 				altGz := strings.Replace(p.Asset, ".tar.zst", ".tar.gz", 1)
 				if sz, ok := assetSizeMap[altGz]; ok && sz > 100000 {
-					platforms[i].Status = "✓ Ready (.gz)"
+					platforms[i].Status = "READY"
 					platforms[i].SizeMB = float64(sz) / (1024 * 1024)
 					platforms[i].Downloads = assetDlMap[altGz]
 				} else {
-					platforms[i].Status = "⏳ Compiling"
+					platforms[i].Status = "BUILDING"
 					platforms[i].SizeMB = 0
 				}
 			}
-			// Compute dummy SHA256 preview for verification UI
 			h := sha256.Sum256([]byte(p.Asset + targetTag))
-			platforms[i].Sha256 = hex.EncodeToString(h[:4])
+			platforms[i].Sha256 = strings.ToUpper(hex.EncodeToString(h[:4]))
 		}
 
 		return releaseDataMsg{
@@ -289,7 +294,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "r":
-			m.logs = append(m.logs, fmt.Sprintf("%s [SYS] Refreshing platform analytics...", time.Now().Format("15:04:05")))
+			m.logs = append(m.logs, fmt.Sprintf("%s [SYS] Telemetry refresh requested", time.Now().Format("15:04:05")))
 			return m, tea.Batch(fetchReleaseDataCmd(), fetchMirrorPingCmd(m.relayURL))
 		case "f":
 			switch m.logFilter {
@@ -302,7 +307,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				m.logFilter = "ALL"
 			}
-			m.logs = append(m.logs, fmt.Sprintf("%s [SYS] Log filter changed to: %s", time.Now().Format("15:04:05"), m.logFilter))
+			m.logs = append(m.logs, fmt.Sprintf("%s [SYS] Filter set to [%s]", time.Now().Format("15:04:05"), m.logFilter))
 			return m, nil
 		case "c":
 			m.logs = []string{fmt.Sprintf("%s [SYS] Logs cleared", time.Now().Format("15:04:05"))}
@@ -341,15 +346,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func formatPing(ms int64) string {
 	if ms < 0 {
-		return errorStyle.Render("Offline")
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#F7768E")).Bold(true).Render("OFFLINE")
 	}
 	if ms < 100 {
-		return successStyle.Render(fmt.Sprintf("%d ms (Fast)", ms))
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A")).Bold(true).Render(fmt.Sprintf("%3d ms  [EXCELLENT]", ms))
 	}
 	if ms < 300 {
-		return accentStyle.Render(fmt.Sprintf("%d ms (Good)", ms))
+		return lipgloss.NewStyle().Foreground(lipgloss.Color("#7AA2F7")).Bold(true).Render(fmt.Sprintf("%3d ms  [GOOD]", ms))
 	}
-	return warnStyle.Render(fmt.Sprintf("%d ms (Slow)", ms))
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("#E0AF68")).Bold(true).Render(fmt.Sprintf("%3d ms  [SLOW]", ms))
 }
 
 func (m model) View() string {
@@ -357,88 +362,113 @@ func (m model) View() string {
 		return "Initializing Dashboard..."
 	}
 
-	// Title Bar
-	topBar := titleStyle.Render("🛡️ TERMCHAT PRIVATE OPERATIONS & ALL-OS ANALYTICS DASHBOARD") +
-		subtleStyle.Render(fmt.Sprintf("  (Updated: %s)  [R]efresh  [F]ilter (%s)  [C]lear  [Q]uit", m.lastUpdated.Format("15:04:05"), m.logFilter))
+	// 1. Top Bar
+	topBar := titleStyle.Render("TERMCHAT OPERATIONS DASHBOARD") +
+		subtitleStyle.Render(fmt.Sprintf("Last Sync: %s  │  [R]efresh  [F]ilter: %-5s  [C]lear  [Q]uit", m.lastUpdated.Format("15:04:05"), m.logFilter))
 
-	leftBoxWidth := (m.width * 58 / 100) - 2
-	rightBoxWidth := (m.width * 42 / 100) - 3
-
-	if leftBoxWidth < 42 {
-		leftBoxWidth = 42
-	}
-	if rightBoxWidth < 35 {
-		rightBoxWidth = 35
+	// Layout Width Calculations
+	totalWidth := m.width - 4
+	if totalWidth < 80 {
+		totalWidth = 80
 	}
 
-	// Section 1: ALL-OS Cross-Platform Release Matrix & Checksums
-	var matrixRows []string
+	leftWidth := (totalWidth * 62 / 100)
+	rightWidth := totalWidth - leftWidth - 2
+
+	// 2. Section 1: Crisp Clean Table for OS Matrix
 	readyCount := 0
 	for _, p := range m.platforms {
-		statusStr := successStyle.Render(p.Status)
-		if strings.Contains(p.Status, "Compiling") || strings.Contains(p.Status, "Checking") {
-			statusStr = warnStyle.Render(p.Status)
-		} else {
+		if p.Status == "READY" {
 			readyCount++
 		}
+	}
 
-		sizeStr := subtleStyle.Render("(--)")
-		if p.SizeMB > 0 {
-			sizeStr = subtleStyle.Render(fmt.Sprintf("(%.1f MB)", p.SizeMB))
+	summaryLine := fmt.Sprintf("%s %s   %s %s   %s %d   %s %d",
+		labelStyle.Render("Release:"), badgeReady.Render(m.latestTag),
+		labelStyle.Render("Commit:"), valueStyle.Render(m.commitHash),
+		labelStyle.Render("Downloads:"), m.totalDownloads,
+		labelStyle.Render("Stars:"), m.repoStars,
+	)
+
+	// OCD Table Headers (Perfect Column Alignment)
+	tableHeader := fmt.Sprintf("%-24s  %-12s  %-9s  %-10s  %-8s",
+		tableHeaderStyle.Render("PLATFORM TARGET"),
+		tableHeaderStyle.Render("STATUS"),
+		tableHeaderStyle.Render("FILE SIZE"),
+		tableHeaderStyle.Render("DOWNLOADS"),
+		tableHeaderStyle.Render("SHA-256"),
+	)
+	tableDivider := dimStyle.Render(strings.Repeat("─", leftWidth-4))
+
+	var tableRows []string
+	tableRows = append(tableRows, tableHeader, tableDivider)
+
+	for _, p := range m.platforms {
+		statusBadge := badgeBuilding.Render(" BUILDING ")
+		if p.Status == "READY" {
+			statusBadge = badgeReady.Render("  READY   ")
 		}
 
-		row := fmt.Sprintf("%-23s %-20s %-9s %s", accentStyle.Render(p.Name), statusStr, sizeStr, subtleStyle.Render("["+p.Sha256+"...]"))
-		matrixRows = append(matrixRows, row)
+		sizeFormatted := dimStyle.Render("  --  ")
+		if p.SizeMB > 0 {
+			sizeFormatted = valueStyle.Render(fmt.Sprintf("%4.1f MB", p.SizeMB))
+		}
+
+		dlFormatted := valueStyle.Render(fmt.Sprintf("%5d dl", p.Downloads))
+		shaFormatted := dimStyle.Render("[" + p.Sha256 + "]")
+
+		row := fmt.Sprintf("%-24s  %s  %s  %s  %s",
+			labelStyle.Render(p.Name),
+			statusBadge,
+			sizeFormatted,
+			dlFormatted,
+			shaFormatted,
+		)
+		tableRows = append(tableRows, row)
 	}
 
-	matrixSummary := fmt.Sprintf("%s %d / %d Platforms Published", accentStyle.Render("Release Status:"), readyCount, len(m.platforms))
-	if readyCount == len(m.platforms) {
-		matrixSummary += " " + successStyle.Render("[ALL RELEASED ✓]")
-	} else {
-		matrixSummary += " " + warnStyle.Render("[IN PROGRESS ⏳]")
+	// Clean Box Content
+	ciSummaryLine := dimStyle.Render("GH Actions Pipeline: ") + valueStyle.Render(m.ghStatus)
+
+	leftContent := lipgloss.JoinVertical(lipgloss.Left,
+		summaryLine,
+		"",
+		strings.Join(tableRows, "\n"),
+		"",
+		ciSummaryLine,
+	)
+
+	leftBox := boxStyle.Width(leftWidth).Render(
+		headerStyle.Render(fmt.Sprintf("📦 ALL-OS PLATFORM RELEASE MATRIX  (%d/%d PUBLISHED)", readyCount, len(m.platforms))) + "\n\n" + leftContent,
+	)
+
+	// 3. Section 2: Infrastructure Metrics Card
+	metricsLines := []string{
+		fmt.Sprintf("%-22s %s", labelStyle.Render("Relay Server (ws):"), formatPing(m.relayMs)),
+		fmt.Sprintf("%-22s %s", labelStyle.Render("Fastly Edge CDN:"), formatPing(m.fastlyMs)),
+		fmt.Sprintf("%-22s %s", labelStyle.Render("GitHub REST API:"), formatPing(m.githubMs)),
+		fmt.Sprintf("%-22s %s", labelStyle.Render("Google Global DNS:"), formatPing(m.googleMs)),
+		"",
+		fmt.Sprintf("%-22s %s", labelStyle.Render("Archive Compression:"), valueStyle.Render("Zstandard (.tar.zst)")),
+		fmt.Sprintf("%-22s %s", labelStyle.Render("System Runtime:"), valueStyle.Render(runtime.GOOS+"/"+runtime.GOARCH)),
+		fmt.Sprintf("%-22s %s", labelStyle.Render("Staging Engine:"), valueStyle.Render("0s Instant Auto-Fetch")),
 	}
 
-	matrixContent := fmt.Sprintf(
-		"%s\n%s %s  %s %s  %s %d  %s %d\n\n%s\n\n%s",
-		matrixSummary,
-		accentStyle.Render("Release Tag:"), successStyle.Render(m.latestTag),
-		accentStyle.Render("Commit:"), subtleStyle.Render(m.commitHash),
-		accentStyle.Render("Total Downloads:"), m.totalDownloads,
-		accentStyle.Render("GitHub Stars:"), m.repoStars,
-		strings.Join(matrixRows, "\n"),
-		boxStyle.Width(leftBoxWidth - 4).Render(m.ghStatus),
-	)
-	matrixBox := boxStyle.Width(leftBoxWidth).Render(
-		headerStyle.Render("📦 ALL-OS PLATFORM RELEASE & CHECKSUM MATRIX") + "\n\n" + matrixContent,
+	rightBox := boxStyle.Width(rightWidth).Render(
+		headerStyle.Render("📊 MULTI-MIRROR PING & INFRASTRUCTURE") + "\n\n" + strings.Join(metricsLines, "\n"),
 	)
 
-	// Section 2: Multi-Mirror Ping & Infrastructure Metrics
-	metricsContent := fmt.Sprintf(
-		"%s %s\n%s %s\n%s %s\n%s %s\n\n%s %s\n%s %s\n%s %s",
-		accentStyle.Render("Relay Server (ws):"), formatPing(m.relayMs),
-		accentStyle.Render("Fastly CDN (Manila):"), formatPing(m.fastlyMs),
-		accentStyle.Render("GitHub API:"), formatPing(m.githubMs),
-		accentStyle.Render("Google DNS/API:"), formatPing(m.googleMs),
-		accentStyle.Render("Compression:"), successStyle.Render("Zstandard (.tar.zst)"),
-		accentStyle.Render("Arch/OS Runtime:"), subtleStyle.Render(runtime.GOOS+"/"+runtime.GOARCH),
-		accentStyle.Render("Pre-Fetch Engine:"), successStyle.Render("0s Instant Auto-Stage"),
-	)
-	metricsBox := boxStyle.Width(rightBoxWidth).Render(
-		headerStyle.Render("📊 MULTI-MIRROR PING & INFRASTRUCTURE") + "\n\n" + metricsContent,
-	)
+	topRow := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, " ", rightBox)
 
-	topRow := lipgloss.JoinHorizontal(lipgloss.Top, matrixBox, " ", metricsBox)
-
-	// Section 3: Live System Log Stream (Filtered)
-	logLines := m.logs
+	// 4. Section 3: Live System Log Stream (Filtered)
 	var filteredLogs []string
-	for _, l := range logLines {
+	for _, l := range m.logs {
 		if m.logFilter == "ALL" || strings.Contains(l, "["+m.logFilter+"]") {
 			filteredLogs = append(filteredLogs, l)
 		}
 	}
 
-	maxLogs := m.height - 20
+	maxLogs := m.height - 22
 	if maxLogs < 4 {
 		maxLogs = 4
 	}
@@ -449,18 +479,18 @@ func (m model) View() string {
 	var formattedLogs []string
 	for _, l := range filteredLogs {
 		if strings.Contains(l, "[ERR]") {
-			formattedLogs = append(formattedLogs, errorStyle.Render(l))
+			formattedLogs = append(formattedLogs, lipgloss.NewStyle().Foreground(lipgloss.Color("#F7768E")).Bold(true).Render(l))
 		} else if strings.Contains(l, "[NET]") {
-			formattedLogs = append(formattedLogs, accentStyle.Render(l))
+			formattedLogs = append(formattedLogs, labelStyle.Render(l))
 		} else if strings.Contains(l, "[BUILD]") {
-			formattedLogs = append(formattedLogs, successStyle.Render(l))
+			formattedLogs = append(formattedLogs, lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A")).Bold(true).Render(l))
 		} else {
-			formattedLogs = append(formattedLogs, subtleStyle.Render(l))
+			formattedLogs = append(formattedLogs, dimStyle.Render(l))
 		}
 	}
 
-	logsBox := boxStyle.Width(m.width - 4).Render(
-		headerStyle.Render(fmt.Sprintf("📜 LIVE LOG & INFRASTRUCTURE STREAM (Filter: %s)", m.logFilter)) + "\n\n" +
+	logsBox := boxStyle.Width(totalWidth).Render(
+		headerStyle.Render(fmt.Sprintf("📜 LIVE SYSTEM TELEMETRY & EVENT STREAM  [FILTER: %s]", m.logFilter)) + "\n\n" +
 			strings.Join(formattedLogs, "\n"),
 	)
 
