@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const AppVersion = "v1.6.0"
+const AppVersion = "v1.7.1"
 
 type progressWriter struct {
 	total      int64
@@ -202,18 +202,20 @@ func createOptimizedHTTPClient(insecure bool) *http.Client {
 }
 
 func resolveFinalDownloadURL(client *http.Client, initialURL string) (string, int64, error) {
-	finalURL := initialURL
-	req, err := http.NewRequest("GET", initialURL, nil)
+	req, err := http.NewRequest("HEAD", initialURL, nil)
 	if err != nil {
-		return initialURL, 0, err
+		req, err = http.NewRequest("GET", initialURL, nil)
+		if err != nil {
+			return initialURL, 0, err
+		}
 	}
-	req.Header.Set("User-Agent", "TermChat-Updater/1.6")
+	req.Header.Set("User-Agent", "TermChat-Updater/1.7")
 
 	redirectClient := &http.Client{
 		Transport: client.Transport,
+		Timeout:   10 * time.Second,
 		CheckRedirect: func(r *http.Request, via []*http.Request) error {
-			finalURL = r.URL.String()
-			return nil
+			return http.ErrUseLastResponse
 		},
 	}
 
@@ -223,7 +225,11 @@ func resolveFinalDownloadURL(client *http.Client, initialURL string) (string, in
 	}
 	defer resp.Body.Close()
 
-	return finalURL, resp.ContentLength, nil
+	if loc := resp.Header.Get("Location"); loc != "" {
+		return loc, resp.ContentLength, nil
+	}
+
+	return initialURL, resp.ContentLength, nil
 }
 
 func downloadMultiThreaded(client *http.Client, targetURL string, totalSize int64, pw *progressWriter) ([]byte, error) {
@@ -348,11 +354,19 @@ func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 		urls := []string{
 			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", archiveName),
 			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", binaryName),
+			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, archiveName),
+			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, binaryName),
 		}
 
 		clients := []*http.Client{
 			createOptimizedHTTPClient(false),
 			createOptimizedHTTPClient(true),
+			http.DefaultClient,
+			&http.Client{
+				Transport: &http.Transport{
+					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+				},
+			},
 		}
 		var resp *http.Response
 
@@ -470,11 +484,19 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	urls := []string{
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", archiveName),
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", binaryName),
+		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, archiveName),
+		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, binaryName),
 	}
 
 	clients := []*http.Client{
 		createOptimizedHTTPClient(false),
 		createOptimizedHTTPClient(true),
+		http.DefaultClient,
+		&http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
+		},
 	}
 	var resp *http.Response
 	var activeClient *http.Client
