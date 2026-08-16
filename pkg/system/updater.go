@@ -173,14 +173,39 @@ func createOptimizedHTTPClient() *http.Client {
 }
 
 func processAndWriteBinary(rawBytes []byte, destFile *os.File) error {
-	if len(rawBytes) >= 2 && rawBytes[0] == 0x1f && rawBytes[1] == 0x8b {
+	if len(rawBytes) < 100000 {
+		return fmt.Errorf("downloaded asset is too small (%d bytes), likely an error response", len(rawBytes))
+	}
+
+	// 1. GZIP Archive (.tar.gz) -> 0x1F 0x8B
+	if rawBytes[0] == 0x1f && rawBytes[1] == 0x8b {
 		return extractTarGz(rawBytes, destFile)
 	}
-	if len(rawBytes) >= 4 && rawBytes[0] == 'P' && rawBytes[1] == 'K' && rawBytes[2] == 0x03 && rawBytes[3] == 0x04 {
+
+	// 2. ZIP Archive (.zip) -> 'P' 'K' 0x03 0x04
+	if rawBytes[0] == 'P' && rawBytes[1] == 'K' && rawBytes[2] == 0x03 && rawBytes[3] == 0x04 {
 		return extractZip(rawBytes, destFile)
 	}
-	_, err := destFile.Write(rawBytes)
-	return err
+
+	// 3. Raw ELF Binary (Linux/Android) -> 0x7F 'E' 'L' 'F'
+	if rawBytes[0] == 0x7f && rawBytes[1] == 'E' && rawBytes[2] == 'L' && rawBytes[3] == 'F' {
+		_, err := destFile.Write(rawBytes)
+		return err
+	}
+
+	// 4. Raw Mach-O Binary (macOS 64-bit / Universal)
+	if (rawBytes[0] == 0xcf && rawBytes[1] == 0xfa) || (rawBytes[0] == 0xce && rawBytes[1] == 0xfa) || (rawBytes[0] == 0xca && rawBytes[1] == 0xfe) {
+		_, err := destFile.Write(rawBytes)
+		return err
+	}
+
+	// 5. Raw PE Binary (Windows .exe) -> 'M' 'Z'
+	if rawBytes[0] == 'M' && rawBytes[1] == 'Z' {
+		_, err := destFile.Write(rawBytes)
+		return err
+	}
+
+	return fmt.Errorf("invalid binary format (received non-executable data or HTML response)")
 }
 
 func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
@@ -207,9 +232,7 @@ func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 		}
 		archiveName := binaryName + ext
 
-		// High-speed URLs: 1. High-speed Relay Proxy Mirror, 2. GitHub Release Asset
 		urls := []string{
-			fmt.Sprintf("https://termchat-o51d.onrender.com/api/update?file=%s", archiveName),
 			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", archiveName),
 			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", binaryName),
 		}
@@ -324,7 +347,6 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	archiveName := binaryName + ext
 
 	urls := []string{
-		fmt.Sprintf("https://termchat-o51d.onrender.com/api/update?file=%s", archiveName),
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", archiveName),
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", binaryName),
 	}
