@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,8 +14,21 @@ import (
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for terminal clients
+		return true
 	},
+}
+
+type RelayPacket struct {
+	Type      string `json:"type"`
+	SenderID  string `json:"sender_id"`
+	Sender    string `json:"sender"`
+	Timestamp int64  `json:"timestamp"`
+	ExtraData string `json:"extra_data,omitempty"`
+}
+
+type PeerInfo struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type Client struct {
@@ -72,6 +86,16 @@ func (s *Server) removeClient(c *Client) {
 		}
 	}
 	s.roomsMu.Unlock()
+
+	// Broadcast leave to room
+	leavePkt := RelayPacket{
+		Type:      "peer_left",
+		SenderID:  c.ID,
+		Sender:    c.Name,
+		Timestamp: time.Now().Unix(),
+	}
+	data, _ := json.Marshal(leavePkt)
+	s.broadcastToRoom(c.Room, c.ID, data)
 }
 
 func (s *Server) broadcastToRoom(roomName string, senderID string, msg []byte) {
@@ -91,7 +115,6 @@ func (s *Server) broadcastToRoom(roomName string, senderID string, msg []byte) {
 			select {
 			case client.SendChan <- msg:
 			default:
-				// Channel full, drop or close
 			}
 		}
 	}
@@ -127,12 +150,41 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	room := s.getOrCreateRoom(roomName)
 	room.mu.Lock()
+
+	// Collect current peers in room
+	var currentPeers []PeerInfo
+	for _, c := range room.Clients {
+		currentPeers = append(currentPeers, PeerInfo{ID: c.ID, Name: c.Name})
+	}
+
 	room.Clients[client.ID] = client
 	room.mu.Unlock()
 
 	log.Printf("🟢 [%s] %s (%s) connected. Total in room: %d", roomName, clientName, clientID, len(room.Clients))
 
-	// Start writer pump
+	// Send current peers list to new client
+	peersJSON, _ := json.Marshal(currentPeers)
+	listPkt := RelayPacket{
+		Type:      "peer_list",
+		SenderID:  "server",
+		Sender:    "Relay",
+		Timestamp: time.Now().Unix(),
+		ExtraData: string(peersJSON),
+	}
+	listData, _ := json.Marshal(listPkt)
+	client.SendChan <- listData
+
+	// Broadcast join to existing clients in room
+	joinPkt := RelayPacket{
+		Type:      "peer_joined",
+		SenderID:  client.ID,
+		Sender:    client.Name,
+		Timestamp: time.Now().Unix(),
+	}
+	joinData, _ := json.Marshal(joinPkt)
+	s.broadcastToRoom(roomName, client.ID, joinData)
+
+	// Writer pump
 	go func() {
 		defer func() {
 			_ = conn.Close()
@@ -156,7 +208,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		log.Printf("🔴 [%s] %s disconnected", roomName, clientName)
 	}()
 
-	conn.SetReadLimit(10 * 1024 * 1024) // 10MB per packet max
+	conn.SetReadLimit(10 * 1024 * 1024)
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {

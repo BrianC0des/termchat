@@ -86,6 +86,9 @@ type Manager struct {
 	relayConn   *websocket.Conn
 	relayMu     sync.Mutex
 
+	cloudPeers   map[string]*PeerConnection
+	cloudPeersMu sync.RWMutex
+
 	incomingMu  sync.Mutex
 	incomingMap map[string]*incomingFileState
 
@@ -119,6 +122,7 @@ func NewManager(name string, tcpPort, udpPort int, downloadDir string, events Ne
 		TCPPort:     tcpPort,
 		DownloadDir: downloadDir,
 		peers:       make(map[string]*PeerConnection),
+		cloudPeers:  make(map[string]*PeerConnection),
 		incomingMap: make(map[string]*incomingFileState),
 		events:      events,
 		ctx:         ctx,
@@ -644,12 +648,66 @@ func (m *Manager) ConnectRelay(relayURL, roomName string) {
 				if pkt.SenderID == m.LocalID {
 					continue
 				}
+
+				if pkt.Type == "peer_list" {
+					var peers []struct {
+						ID   string `json:"id"`
+						Name string `json:"name"`
+					}
+					if err := json.Unmarshal([]byte(pkt.ExtraData), &peers); err == nil {
+						m.cloudPeersMu.Lock()
+						m.cloudPeers = make(map[string]*PeerConnection)
+						for _, p := range peers {
+							if p.ID != m.LocalID {
+								m.cloudPeers[p.ID] = &PeerConnection{
+									ID:       p.ID,
+									Name:     p.Name,
+									RemoteIP: "Cloud",
+								}
+							}
+						}
+						m.cloudPeersMu.Unlock()
+						if m.events.OnPeerJoin != nil {
+							m.events.OnPeerJoin("room", "Room", "Cloud")
+						}
+					}
+					continue
+				}
+
+				if pkt.Type == "peer_joined" {
+					m.cloudPeersMu.Lock()
+					m.cloudPeers[pkt.SenderID] = &PeerConnection{
+						ID:       pkt.SenderID,
+						Name:     pkt.Sender,
+						RemoteIP: "Cloud",
+					}
+					m.cloudPeersMu.Unlock()
+					if m.events.OnPeerJoin != nil {
+						m.events.OnPeerJoin(pkt.SenderID, pkt.Sender, "Cloud")
+					}
+					continue
+				}
+
+				if pkt.Type == "peer_left" {
+					m.cloudPeersMu.Lock()
+					delete(m.cloudPeers, pkt.SenderID)
+					m.cloudPeersMu.Unlock()
+					if m.events.OnPeerLeave != nil {
+						m.events.OnPeerLeave(pkt.SenderID, pkt.Sender)
+					}
+					continue
+				}
+
 				m.handlePacket(&PeerConnection{ID: pkt.SenderID, Name: pkt.Sender, RemoteIP: "cloud-relay"}, pkt)
 			}
 
 			m.relayMu.Lock()
 			m.relayConn = nil
 			m.relayMu.Unlock()
+
+			m.cloudPeersMu.Lock()
+			m.cloudPeers = make(map[string]*PeerConnection)
+			m.cloudPeersMu.Unlock()
 
 			time.Sleep(3 * time.Second)
 		}
@@ -885,12 +943,18 @@ func (m *Manager) sendToPeer(peer *PeerConnection, p *Packet) error {
 
 func (m *Manager) GetPeers() []PeerConnection {
 	m.peersMu.RLock()
-	defer m.peersMu.RUnlock()
-
-	list := make([]PeerConnection, 0, len(m.peers))
+	list := make([]PeerConnection, 0, len(m.peers)+len(m.cloudPeers))
 	for _, p := range m.peers {
 		list = append(list, *p)
 	}
+	m.peersMu.RUnlock()
+
+	m.cloudPeersMu.RLock()
+	for _, p := range m.cloudPeers {
+		list = append(list, *p)
+	}
+	m.cloudPeersMu.RUnlock()
+
 	return list
 }
 

@@ -152,29 +152,53 @@ func (m *Model) View() string {
 
 func (m *Model) renderSidebar(peers []network.PeerConnection) string {
 	var sb strings.Builder
-	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7AA2F7")).Render("CONNECTED"))
+
+	totalCount := len(peers) + 1
+	dropdownIcon := "▾"
+	if !m.showMembersDropdown {
+		dropdownIcon = "▸"
+	}
+
+	headerText := fmt.Sprintf("MEMBERS (%d) %s", totalCount, dropdownIcon)
+	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7AA2F7")).Render(headerText))
+	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Render(" [F2]"))
 	sb.WriteString("\n")
 
-	if len(peers) == 0 {
-		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Render("No peers yet\nListening on LAN..."))
-	} else {
-		for _, p := range peers {
-			peerName := p.Name
-			battStr := ""
-			if batt, ok := m.peerBatteries[p.Name]; ok {
-				battStr = fmt.Sprintf(" 🔋%d%%", batt.Percentage)
+	if m.showMembersDropdown {
+		// Show Local User
+		myName := m.manager.LocalName
+		if len(myName) > 9 {
+			myName = myName[:7] + ".."
+		}
+		sb.WriteString(fmt.Sprintf("%s %s %s\n",
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A")).Render("●"),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#C0CAF5")).Render(myName),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#E0AF68")).Render("(You)"),
+		))
+
+		// Show Connected Peers
+		if len(peers) == 0 {
+			sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Render("  (Waiting for peers)\n"))
+		} else {
+			for _, p := range peers {
+				peerName := p.Name
+				battStr := ""
+				if batt, ok := m.peerBatteries[p.Name]; ok {
+					battStr = fmt.Sprintf(" 🔋%d%%", batt.Percentage)
+				}
+				if len(peerName) > 10 {
+					peerName = peerName[:8] + ".."
+				}
+				sb.WriteString(fmt.Sprintf("%s %s%s\n",
+					lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A")).Render("●"),
+					lipgloss.NewStyle().Foreground(lipgloss.Color("#7DCFFF")).Render(peerName),
+					lipgloss.NewStyle().Foreground(lipgloss.Color("#E0AF68")).Render(battStr),
+				))
 			}
-			if len(peerName) > 10 {
-				peerName = peerName[:8] + ".."
-			}
-			sb.WriteString(fmt.Sprintf("● %s%s\n",
-				lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A")).Render(peerName),
-				lipgloss.NewStyle().Foreground(lipgloss.Color("#7DCFFF")).Render(battStr),
-			))
 		}
 	}
 
-	sb.WriteString("\n\n")
+	sb.WriteString("\n")
 	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7AA2F7")).Render("QUICK ACTIONS"))
 	sb.WriteString("\n")
 	sb.WriteString(fmt.Sprintf("%s /clip\n%s /browse\n%s /battery\n%s /ring\n%s /qr",

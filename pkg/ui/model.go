@@ -35,10 +35,11 @@ type Model struct {
 	width         int
 	height        int
 	ready         bool
-	showHelp      bool
-	showQR        bool
-	qrContent     string
-	peerBatteries map[string]system.BatteryInfo
+	showHelp            bool
+	showQR              bool
+	qrContent           string
+	showMembersDropdown bool
+	peerBatteries       map[string]system.BatteryInfo
 }
 
 // Custom Tea Messages
@@ -118,10 +119,11 @@ func NewModel(mgr *network.Manager) *Model {
 		messages:      initialMsgs,
 		transfers:     make(map[string]network.FileTransferProgress),
 		textInput:     ti,
-		filePicker:    NewFilePicker(),
-		showHelp:      false,
-		showQR:        false,
-		peerBatteries: make(map[string]system.BatteryInfo),
+		filePicker:          NewFilePicker(),
+		showHelp:            false,
+		showQR:              false,
+		showMembersDropdown: true,
+		peerBatteries:       make(map[string]system.BatteryInfo),
 	}
 }
 
@@ -195,6 +197,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case tea.KeyF1:
 			m.showHelp = !m.showHelp
+			return m, nil
+
+		case tea.KeyF2:
+			m.showMembersDropdown = !m.showMembersDropdown
 			return m, nil
 
 		case tea.KeyCtrlO:
@@ -755,22 +761,23 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		m.manager.DownloadDir = newDir
 		m.addSystemMsg(fmt.Sprintf("📁 Download directory updated to: %s", newDir))
 
-	case "/peers":
+	case "/peers", "/members", "/users", "/who":
 		peers := m.manager.GetPeers()
-		if len(peers) == 0 {
-			m.addSystemMsg("👥 No peers connected. Ensure both devices are on the same Wi-Fi or run `/connect <IP>:7332`")
-		} else {
-			var sb strings.Builder
-			sb.WriteString(fmt.Sprintf("👥 Connected Peers (%d):\n", len(peers)))
-			for _, p := range peers {
-				extra := ""
-				if batt, ok := m.peerBatteries[p.Name]; ok {
-					extra = fmt.Sprintf(" [🔋 %d%%]", batt.Percentage)
-				}
-				sb.WriteString(fmt.Sprintf("   • %s (%s)%s\n", p.Name, p.RemoteIP, extra))
-			}
-			m.addSystemMsg(strings.TrimRight(sb.String(), "\n"))
+		var sb strings.Builder
+		roomInfo := "Direct LAN"
+		if m.manager.RoomName != "" {
+			roomInfo = "#" + m.manager.RoomName
 		}
+		sb.WriteString(fmt.Sprintf("👥 Room Members in %s (%d online):\n", roomInfo, len(peers)+1))
+		sb.WriteString(fmt.Sprintf("   • %s (You) [👑 Online]\n", m.manager.LocalName))
+		for _, p := range peers {
+			extra := ""
+			if batt, ok := m.peerBatteries[p.Name]; ok {
+				extra = fmt.Sprintf(" [🔋 %d%%]", batt.Percentage)
+			}
+			sb.WriteString(fmt.Sprintf("   • %s (%s)%s\n", p.Name, p.RemoteIP, extra))
+		}
+		m.addSystemMsg(strings.TrimRight(sb.String(), "\n"))
 
 	case "/ip":
 		ips := network.GetLocalIPs()
