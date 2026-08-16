@@ -505,11 +505,15 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	// Check if background pre-download is currently in progress
 	if active, tag, _ := GetPreFetchStatus(); active {
 		if onProgress != nil {
-			onProgress(fmt.Sprintf("[NET] Background pre-download for %s is currently in progress... Waiting for completion...", tag))
+			onProgress(fmt.Sprintf("[NET] Background pre-download for %s is currently active... Waiting for completion...", tag))
 		}
-		for i := 0; i < 30; i++ {
+		for i := 0; i < 60; i++ {
 			time.Sleep(500 * time.Millisecond)
-			if stillActive, _, _ := GetPreFetchStatus(); !stillActive {
+			if active, _, pct := GetPreFetchStatus(); active {
+				if onProgress != nil && i%4 == 0 {
+					onProgress(fmt.Sprintf("[NET] Background pre-download progress: %d%%...", pct))
+				}
+			} else {
 				break
 			}
 		}
@@ -576,16 +580,25 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 
 	for _, client := range clients {
 		for _, u := range urls {
-			req, rErr := http.NewRequest("GET", u, nil)
+			finalURL, totalLen, rErr := resolveFinalDownloadURL(client, u)
+			if rErr == nil && finalURL != "" {
+				targetURL = finalURL
+			} else {
+				targetURL = u
+			}
+
+			req, rErr := http.NewRequest("GET", targetURL, nil)
 			if rErr != nil {
 				continue
 			}
-			req.Header.Set("User-Agent", "TermChat-Updater/1.6")
+			req.Header.Set("User-Agent", "TermChat-Updater/1.8")
 			r, dErr := client.Do(req)
 			if dErr == nil && r.StatusCode == http.StatusOK {
 				resp = r
 				activeClient = client
-				targetURL = u
+				if totalLen > 0 {
+					r.ContentLength = totalLen
+				}
 				break
 			}
 			if r != nil {
