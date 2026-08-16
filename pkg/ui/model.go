@@ -306,13 +306,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch m.sidebarMode {
 			case SidebarNormal:
 				m.sidebarMode = SidebarWide
-				m.addSystemMsg("📐 Sidebar expanded (Wide Mode: 34 cols)")
 			case SidebarWide:
 				m.sidebarMode = SidebarHidden
-				m.addSystemMsg("📐 Sidebar hidden (Zen Mode: Fullscreen Chat)")
 			case SidebarHidden:
 				m.sidebarMode = SidebarNormal
-				m.addSystemMsg("📐 Sidebar restored (Normal Mode: 22 cols)")
 			}
 			m.recalculateViewport()
 			return m, nil
@@ -856,26 +853,20 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			switch m.sidebarMode {
 			case SidebarNormal:
 				m.sidebarMode = SidebarWide
-				m.addSystemMsg("📐 Sidebar expanded (Wide Mode: 34 cols)")
 			case SidebarWide:
 				m.sidebarMode = SidebarHidden
-				m.addSystemMsg("📐 Sidebar hidden (Zen Mode: Fullscreen Chat)")
 			case SidebarHidden:
 				m.sidebarMode = SidebarNormal
-				m.addSystemMsg("📐 Sidebar restored (Normal Mode: 22 cols)")
 			}
 		} else {
 			modeArg := strings.ToLower(parts[1])
 			switch modeArg {
 			case "wide", "expand", "max":
 				m.sidebarMode = SidebarWide
-				m.addSystemMsg("📐 Sidebar set to Wide Mode (34 cols)")
 			case "hide", "hidden", "off", "zen":
 				m.sidebarMode = SidebarHidden
-				m.addSystemMsg("📐 Sidebar hidden (Zen Mode: Fullscreen Chat)")
 			case "normal", "show", "on", "default":
 				m.sidebarMode = SidebarNormal
-				m.addSystemMsg("📐 Sidebar set to Normal Mode (22 cols)")
 			default:
 				m.addSystemMsg("Usage: /sidebar [normal | wide | hide | toggle]")
 			}
