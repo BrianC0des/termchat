@@ -172,6 +172,17 @@ func createOptimizedHTTPClient() *http.Client {
 	return &http.Client{Transport: transport, Timeout: 0}
 }
 
+func processAndWriteBinary(rawBytes []byte, destFile *os.File) error {
+	if len(rawBytes) >= 2 && rawBytes[0] == 0x1f && rawBytes[1] == 0x8b {
+		return extractTarGz(rawBytes, destFile)
+	}
+	if len(rawBytes) >= 4 && rawBytes[0] == 'P' && rawBytes[1] == 'K' && rawBytes[2] == 0x03 && rawBytes[3] == 0x04 {
+		return extractZip(rawBytes, destFile)
+	}
+	_, err := destFile.Write(rawBytes)
+	return err
+}
+
 func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 	go func() {
 		latestTag, err := FetchLatestVersionTag()
@@ -205,18 +216,16 @@ func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 
 		client := createOptimizedHTTPClient()
 		var resp *http.Response
-		var usedURL string
 
 		for _, u := range urls {
 			req, rErr := http.NewRequest("GET", u, nil)
 			if rErr != nil {
 				continue
 			}
-			req.Header.Set("User-Agent", "TermChat-Updater/1.3")
+			req.Header.Set("User-Agent", "TermChat-Updater/1.4")
 			r, dErr := client.Do(req)
 			if dErr == nil && r.StatusCode == http.StatusOK {
 				resp = r
-				usedURL = u
 				break
 			}
 			if r != nil {
@@ -240,13 +249,7 @@ func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 		}
 		defer stagedFile.Close()
 
-		if strings.HasSuffix(usedURL, ".tar.gz") || strings.Contains(usedURL, ".tar.gz") {
-			err = extractTarGz(gzData, stagedFile)
-		} else if strings.HasSuffix(usedURL, ".zip") || strings.Contains(usedURL, ".zip") {
-			err = extractZip(gzData, stagedFile)
-		} else {
-			_, err = stagedFile.Write(gzData)
-		}
+		err = processAndWriteBinary(gzData, stagedFile)
 
 		if err == nil {
 			_ = os.Chmod(getStagedBinaryPath(), 0755)
@@ -328,18 +331,16 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 
 	client := createOptimizedHTTPClient()
 	var resp *http.Response
-	var usedURL string
 
 	for _, u := range urls {
 		req, rErr := http.NewRequest("GET", u, nil)
 		if rErr != nil {
 			continue
 		}
-		req.Header.Set("User-Agent", "TermChat-Updater/1.3")
+		req.Header.Set("User-Agent", "TermChat-Updater/1.4")
 		r, dErr := client.Do(req)
 		if dErr == nil && r.StatusCode == http.StatusOK {
 			resp = r
-			usedURL = u
 			break
 		}
 		if r != nil {
@@ -385,13 +386,7 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	}()
 
 	rawBytes := downloadedData.Bytes()
-	if strings.HasSuffix(usedURL, ".tar.gz") || strings.Contains(usedURL, ".tar.gz") {
-		err = extractTarGz(rawBytes, tmpFile)
-	} else if strings.HasSuffix(usedURL, ".zip") || strings.Contains(usedURL, ".zip") {
-		err = extractZip(rawBytes, tmpFile)
-	} else {
-		_, err = tmpFile.Write(rawBytes)
-	}
+	err = processAndWriteBinary(rawBytes, tmpFile)
 	_ = tmpFile.Close()
 
 	if err != nil {
