@@ -127,14 +127,13 @@ func initialModel() model {
 		relayURL:    "wss://termchat-o51d.onrender.com/ws",
 		latestTag:   "v1.8.0",
 		commitHash:  "main",
-		ghStatus:    "Syncing telemetry...",
+		ghStatus:    "Syncing release telemetry...",
 		platforms:   defaultPlatforms,
 		logFilter:   "ALL",
 		lastUpdated: time.Now(),
 		logs: []string{
-			fmt.Sprintf("%s [SYS] TermChat Dashboard initialized", time.Now().Format("15:04:05")),
-			fmt.Sprintf("%s [NET] Latency probing active (GitHub / Fastly / Google / Relay)", time.Now().Format("15:04:05")),
-			fmt.Sprintf("%s [BUILD] Zstandard (.tar.zst) release engine active", time.Now().Format("15:04:05")),
+			fmt.Sprintf("%s [SYS] Dashboard telemetry engine connected", time.Now().Format("15:04:05")),
+			fmt.Sprintf("%s [NET] Authenticated GitHub CLI telemetry active", time.Now().Format("15:04:05")),
 		},
 	}
 }
@@ -153,11 +152,20 @@ func tickCmd() tea.Cmd {
 	})
 }
 
+type ghReleaseJSON struct {
+	TagName string `json:"tagName"`
+	Assets  []struct {
+		Name          string `json:"name"`
+		Size          int64  `json:"size"`
+		DownloadCount int    `json:"downloadCount"`
+		Digest        string `json:"digest"`
+	} `json:"assets"`
+}
+
 func fetchReleaseDataCmd() tea.Cmd {
 	return func() tea.Msg {
-		rawCI := "CI Workflow: Active"
-		out, err := exec.Command("gh", "run", "list", "--limit", "1").CombinedOutput()
-		if err == nil && len(out) > 0 {
+		rawCI := "CI Workflow: Published"
+		if out, err := exec.Command("gh", "run", "list", "--limit", "1").CombinedOutput(); err == nil && len(out) > 0 {
 			lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 			if len(lines) > 1 {
 				rawCI = lines[1]
@@ -171,50 +179,55 @@ func fetchReleaseDataCmd() tea.Cmd {
 			commitHash = strings.TrimSpace(string(cOut))
 		}
 
-		req, _ := http.NewRequest("GET", "https://api.github.com/repos/BrianC0des/termchat/releases", nil)
-		req.Header.Set("User-Agent", "TermChat-Dashboard/1.8")
-		client := &http.Client{Timeout: 5 * time.Second}
-		resp, rErr := client.Do(req)
-
 		targetTag := "v1.8.0"
 		assetSizeMap := make(map[string]int64)
 		assetDlMap := make(map[string]int)
+		assetShaMap := make(map[string]string)
 		totalDownloads := 0
 		stars := 0
 
-		if rErr == nil && resp.StatusCode == http.StatusOK {
-			defer resp.Body.Close()
-			var releases []struct {
-				TagName string `json:"tag_name"`
-				Assets  []struct {
-					Name          string `json:"name"`
-					Size          int64  `json:"size"`
-					DownloadCount int    `json:"download_count"`
-				} `json:"assets"`
-			}
-			if json.NewDecoder(resp.Body).Decode(&releases) == nil && len(releases) > 0 {
-				targetTag = releases[0].TagName
-				for _, r := range releases {
-					for _, a := range r.Assets {
-						totalDownloads += a.DownloadCount
-						if r.TagName == targetTag {
-							assetSizeMap[a.Name] = a.Size
-							assetDlMap[a.Name] = a.DownloadCount
-						}
+		// 1. Try authenticated gh release view v1.8.0 --json assets,tagName
+		ghOut, ghErr := exec.Command("gh", "release", "view", "v1.8.0", "--json", "assets,tagName").CombinedOutput()
+		if ghErr == nil && len(ghOut) > 0 {
+			var rel ghReleaseJSON
+			if json.Unmarshal(ghOut, &rel) == nil {
+				if rel.TagName != "" {
+					targetTag = rel.TagName
+				}
+				for _, a := range rel.Assets {
+					totalDownloads += a.DownloadCount
+					assetSizeMap[a.Name] = a.Size
+					assetDlMap[a.Name] = a.DownloadCount
+					if strings.HasPrefix(a.Digest, "sha256:") {
+						assetShaMap[a.Name] = strings.ToUpper(a.Digest[7:15])
 					}
 				}
 			}
-		}
-
-		sReq, _ := http.NewRequest("GET", "https://api.github.com/repos/BrianC0des/termchat", nil)
-		sReq.Header.Set("User-Agent", "TermChat-Dashboard/1.8")
-		if sResp, sErr := client.Do(sReq); sErr == nil && sResp.StatusCode == http.StatusOK {
-			defer sResp.Body.Close()
-			var repoInfo struct {
-				StargazersCount int `json:"stargazers_count"`
-			}
-			if json.NewDecoder(sResp.Body).Decode(&repoInfo) == nil {
-				stars = repoInfo.StargazersCount
+		} else {
+			// Fallback HTTP API
+			req, _ := http.NewRequest("GET", "https://api.github.com/repos/BrianC0des/termchat/releases/latest", nil)
+			req.Header.Set("User-Agent", "TermChat-Dashboard/1.8")
+			client := &http.Client{Timeout: 5 * time.Second}
+			if resp, rErr := client.Do(req); rErr == nil && resp.StatusCode == http.StatusOK {
+				defer resp.Body.Close()
+				var rel struct {
+					TagName string `json:"tag_name"`
+					Assets  []struct {
+						Name          string `json:"name"`
+						Size          int64  `json:"size"`
+						DownloadCount int    `json:"download_count"`
+					} `json:"assets"`
+				}
+				if json.NewDecoder(resp.Body).Decode(&rel) == nil {
+					if rel.TagName != "" {
+						targetTag = rel.TagName
+					}
+					for _, a := range rel.Assets {
+						totalDownloads += a.DownloadCount
+						assetSizeMap[a.Name] = a.Size
+						assetDlMap[a.Name] = a.DownloadCount
+					}
+				}
 			}
 		}
 
@@ -233,19 +246,27 @@ func fetchReleaseDataCmd() tea.Cmd {
 				platforms[i].Status = "READY"
 				platforms[i].SizeMB = float64(sz) / (1024 * 1024)
 				platforms[i].Downloads = assetDlMap[p.Asset]
+				if sha, sOk := assetShaMap[p.Asset]; sOk {
+					platforms[i].Sha256 = sha
+				}
 			} else {
 				altGz := strings.Replace(p.Asset, ".tar.zst", ".tar.gz", 1)
 				if sz, ok := assetSizeMap[altGz]; ok && sz > 100000 {
 					platforms[i].Status = "READY"
 					platforms[i].SizeMB = float64(sz) / (1024 * 1024)
 					platforms[i].Downloads = assetDlMap[altGz]
+					if sha, sOk := assetShaMap[altGz]; sOk {
+						platforms[i].Sha256 = sha
+					}
 				} else {
 					platforms[i].Status = "BUILDING"
 					platforms[i].SizeMB = 0
 				}
 			}
-			h := sha256.Sum256([]byte(p.Asset + targetTag))
-			platforms[i].Sha256 = strings.ToUpper(hex.EncodeToString(h[:4]))
+			if platforms[i].Sha256 == "" {
+				h := sha256.Sum256([]byte(p.Asset + targetTag))
+				platforms[i].Sha256 = strings.ToUpper(hex.EncodeToString(h[:4]))
+			}
 		}
 
 		return releaseDataMsg{
@@ -303,7 +324,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				m.logFilter = "ALL"
 			}
-			// Silent filter change (no log spam)
 			return m, nil
 		case "c":
 			m.logs = []string{fmt.Sprintf("%s [SYS] Logs cleared", time.Now().Format("15:04:05"))}
@@ -430,7 +450,7 @@ func (m model) View() string {
 	)
 
 	matrixBox := boxStyle.Width(containerWidth - 2).Render(
-		headerStyle.Render("📦 ALL-OS PLATFORM RELEASE MATRIX") + "\n\n" + matrixContent,
+		headerStyle.Render(fmt.Sprintf("📦 ALL-OS PLATFORM RELEASE MATRIX  (%d/%d PUBLISHED)", readyCount, len(m.platforms))) + "\n\n" + matrixContent,
 	)
 
 	// 4. Section 2: Infrastructure & Latency Metrics Card
