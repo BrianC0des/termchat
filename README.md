@@ -63,24 +63,24 @@ termchat
 
 | Command | Shortcut | Description |
 |---|---|---|
-| `/room <name> [pass]` | | Create or join a 24/7 Cloud room with optional AES-256 password |
-| `/auth <pass>` | | Lock or unlock AES-256 End-to-End Encryption in current chat |
-| `/copy` or `/cp` | | Copy the latest message to your OS clipboard (`/copy all` for full log) |
-| `/paste` or `/p` | `Ctrl + V` | Paste system clipboard directly into chat bar |
-| `/files` or `/vault` | `Ctrl + F` | Browse all uploaded files in the room & click to download |
-| `/get <num\|url>` | | Download shared file by index number (e.g. `/get 1`) or URL |
-| `/browse` | `Ctrl + O` | Open interactive file explorer to select & send files |
-| `/send <filepath>` | `Tab` | Send / upload file to everyone in the room |
+| `/room <name> [pass]` | | Create or join a 24/7 Cloud room with optional E2E password |
+| `/lan` / `/offline` | | Switch to 100% offline local Wi-Fi direct P2P mode |
+| `/send <file> [expiry]` | `Tab` | Send file/folder with optional expiration (`10m`, `1h`, `1d`, `7d`) |
+| `/files` | `Ctrl + F` | Open Shared Files Vault sidebar to select & download |
+| `/get <num\|url>` | | Download file from cloud URL or # vault index number |
+| `/browse` | `Ctrl + O` | Open interactive TUI file explorer to pick and send files |
+| `/nick <name>` | | Change and permanently save your default nickname |
+| `/reply <#> <msg>` | | Reply directly to a specific message ID |
+| `/copy <#>` | | Copy specific message text to system clipboard |
+| `/pin <#>` | | Pin important message to top header banner |
 | `/clip` or `/c` | | Push your clipboard directly to connected peers |
-| `/battery` | | Query phone battery percentage and charging status |
-| `/ring` or `/find` | | Ring/vibrate connected mobile device |
-| `/notify <msg>` | | Push notification popup to phone lock screen |
+| `/theme <name>` | | Switch UI theme (`catppuccin`, `dracula`, `nord`, etc.) |
+| `/sidebar` | `F3` / `Ctrl+B` | Toggle sidebar layout (Normal, Wide, Zen Fullscreen) |
 | `@agy <prompt>` | | Ask Antigravity AI anything directly in the chatroom |
-| `/ip` / `/peers` | | Show local network info and connected peers |
-| `/clear` | | Clear screen messages |
+| `/peers` / `/ip` | | Show room members online and local network IP |
 | `/update` | | 1-Click Self-Update TermChat to the latest version |
-| `/help` | `F1` | Open in-app help cheatsheet |
-| `/quit` | `Ctrl + C` | Exit TermChat |
+| `/help` | `F1` | Open in-app command cheatsheet |
+| `/clear` / `/quit` | `Ctrl + C` | Clear message buffer / Quit TermChat |
 
 ---
 

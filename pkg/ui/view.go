@@ -316,7 +316,7 @@ func (m *Model) renderSidebar(peers []network.PeerConnection, width int) string 
 }
 
 func (m *Model) renderHelpView() string {
-	boxWidth := min(m.width-4, 76)
+	boxWidth := min(m.width-4, 78)
 	boxHeight := min(m.height-2, 28)
 
 	helpBox := lipgloss.NewStyle().
@@ -344,24 +344,28 @@ func (m *Model) renderHelpView() string {
   %s %s
   %s %s
   %s %s
+  %s %s
+  %s %s
 
   %s
 `,
 		title,
-		HelpKeyStyle.Render("Ctrl+O / /browse "), HelpDescStyle.Render("Interactive file explorer to pick & send files"),
-		HelpKeyStyle.Render("/send <file_path>"), HelpDescStyle.Render("Send file (supports Tab path autocompletion)"),
-		HelpKeyStyle.Render("/clip / /c       "), HelpDescStyle.Render("Sync current clipboard to connected device"),
-		HelpKeyStyle.Render("/battery         "), HelpDescStyle.Render("Query peer device battery % and charging state"),
-		HelpKeyStyle.Render("/notify <text>   "), HelpDescStyle.Render("Send popup notification to phone lock screen"),
-		HelpKeyStyle.Render("/ring / /find    "), HelpDescStyle.Render("Ring/vibrate connected device at max volume"),
-		HelpKeyStyle.Render("/open <url>      "), HelpDescStyle.Render("Open URL directly in peer device's browser"),
-		HelpKeyStyle.Render("/play / /next    "), HelpDescStyle.Render("Control media playback (playerctl / media player)"),
-		HelpKeyStyle.Render("/exec <command>  "), HelpDescStyle.Render("Execute remote shell command & stream back stdout"),
-		HelpKeyStyle.Render("/auth <pass>     "), HelpDescStyle.Render("Enable End-to-End AES-256 Encryption"),
-		HelpKeyStyle.Render("/qr              "), HelpDescStyle.Render("Show ASCII QR Code for instant phone pairing"),
-		HelpKeyStyle.Render("/connect <ip>    "), HelpDescStyle.Render("Manually connect to IP (e.g. /connect 192.168.1.5)"),
-		HelpKeyStyle.Render("/dir <path>      "), HelpDescStyle.Render("Set download directory for incoming files"),
-		HelpKeyStyle.Render("/clear / /quit   "), HelpDescStyle.Render("Clear screen / Quit TermChat"),
+		HelpKeyStyle.Render("Ctrl+O / /browse "), HelpDescStyle.Render("Interactive TUI file explorer to send files"),
+		HelpKeyStyle.Render("/send <file> [exp]"), HelpDescStyle.Render("Send file/folder with optional expiration (10m, 1h, 1d, 7d)"),
+		HelpKeyStyle.Render("Ctrl+F / /files  "), HelpDescStyle.Render("Open Shared Files Vault sidebar to select & download"),
+		HelpKeyStyle.Render("/get <url|idx>   "), HelpDescStyle.Render("Download file from cloud URL or # vault index number"),
+		HelpKeyStyle.Render("/room <name> [pw]"), HelpDescStyle.Render("Switch cloud relay room with optional E2E password"),
+		HelpKeyStyle.Render("/lan / /offline  "), HelpDescStyle.Render("Switch to offline local Wi-Fi P2P mode (50-80 MB/s)"),
+		HelpKeyStyle.Render("/nick <name>     "), HelpDescStyle.Render("Set and permanently save default user nickname"),
+		HelpKeyStyle.Render("/reply <#> <msg> "), HelpDescStyle.Render("Reply to specific message ID in chat"),
+		HelpKeyStyle.Render("/copy <#>        "), HelpDescStyle.Render("Copy specific message text to system clipboard"),
+		HelpKeyStyle.Render("/pin <#>         "), HelpDescStyle.Render("Pin important message to the top header banner"),
+		HelpKeyStyle.Render("/clip / /c       "), HelpDescStyle.Render("Sync current system clipboard content with peers"),
+		HelpKeyStyle.Render("F3 / Ctrl+B      "), HelpDescStyle.Render("Toggle sidebar (Normal, Wide, Zen Fullscreen)"),
+		HelpKeyStyle.Render("/theme <name>    "), HelpDescStyle.Render("Switch color theme (catppuccin, dracula, nord, cyber, etc.)"),
+		HelpKeyStyle.Render("/dir <path>      "), HelpDescStyle.Render("Change destination directory for incoming downloads"),
+		HelpKeyStyle.Render("/qr              "), HelpDescStyle.Render("Display ASCII QR Code for fast mobile pairing"),
+		HelpKeyStyle.Render("/clear / /quit   "), HelpDescStyle.Render("Clear message buffer / Quit TermChat"),
 		lipgloss.NewStyle().Foreground(SecondaryColor).Render("Press ESC, F1, or Enter to return to chat..."),
 	)
 

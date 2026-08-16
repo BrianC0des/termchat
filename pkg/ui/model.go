@@ -136,7 +136,7 @@ type execOutputMsg struct {
 
 func NewModel(mgr *network.Manager) *Model {
 	ti := textinput.New()
-	ti.Placeholder = "Type message, /help, /browse, /clip, /battery..."
+	ti.Placeholder = "Type message, /help, /browse, /files, /reply, /room..."
 	ti.Focus()
 	ti.CharLimit = 100000
 	ti.Width = 60
@@ -1378,11 +1378,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		sb.WriteString(fmt.Sprintf("👥 Room Members in %s (%d online):\n", roomInfo, len(peers)+1))
 		sb.WriteString(fmt.Sprintf("   • %s (You) [👑 Online]\n", m.manager.LocalName))
 		for _, p := range peers {
-			extra := ""
-			if batt, ok := m.peerBatteries[p.Name]; ok {
-				extra = fmt.Sprintf(" [🔋 %d%%]", batt.Percentage)
-			}
-			sb.WriteString(fmt.Sprintf("   • %s (%s)%s\n", p.Name, p.RemoteIP, extra))
+			sb.WriteString(fmt.Sprintf("   • %s (%s) [🟢 Online]\n", p.Name, p.RemoteIP))
 		}
 		m.addSystemMsg(strings.TrimRight(sb.String(), "\n"))
 
