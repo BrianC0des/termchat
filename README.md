@@ -67,8 +67,10 @@ termchat
 | `/auth <pass>` | | Lock or unlock AES-256 End-to-End Encryption in current chat |
 | `/copy` or `/cp` | | Copy the latest message to your OS clipboard (`/copy all` for full log) |
 | `/paste` or `/p` | `Ctrl + V` | Paste system clipboard directly into chat bar |
+| `/files` or `/vault` | `Ctrl + F` | Browse all uploaded files in the room & click to download |
+| `/get <num\|url>` | | Download shared file by index number (e.g. `/get 1`) or URL |
 | `/browse` | `Ctrl + O` | Open interactive file explorer to select & send files |
-| `/send <filepath>` | `Tab` | Send file to everyone in the room |
+| `/send <filepath>` | `Tab` | Send / upload file to everyone in the room |
 | `/clip` or `/c` | | Push your clipboard directly to connected peers |
 | `/battery` | | Query phone battery percentage and charging status |
 | `/ring` or `/find` | | Ring/vibrate connected mobile device |
