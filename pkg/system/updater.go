@@ -201,6 +201,31 @@ func createOptimizedHTTPClient(insecure bool) *http.Client {
 	return &http.Client{Transport: transport, Timeout: 0}
 }
 
+func resolveFinalDownloadURL(client *http.Client, initialURL string) (string, int64, error) {
+	finalURL := initialURL
+	req, err := http.NewRequest("GET", initialURL, nil)
+	if err != nil {
+		return initialURL, 0, err
+	}
+	req.Header.Set("User-Agent", "TermChat-Updater/1.6")
+
+	redirectClient := &http.Client{
+		Transport: client.Transport,
+		CheckRedirect: func(r *http.Request, via []*http.Request) error {
+			finalURL = r.URL.String()
+			return nil
+		},
+	}
+
+	resp, err := redirectClient.Do(req)
+	if err != nil {
+		return initialURL, 0, err
+	}
+	defer resp.Body.Close()
+
+	return finalURL, resp.ContentLength, nil
+}
+
 func downloadMultiThreaded(client *http.Client, targetURL string, totalSize int64, pw *progressWriter) ([]byte, error) {
 	numChunks := 8
 	chunkSize := totalSize / int64(numChunks)
@@ -224,7 +249,7 @@ func downloadMultiThreaded(client *http.Client, targetURL string, totalSize int6
 				errOnce.Do(func() { downloadErr = err })
 				return
 			}
-			req.Header.Set("User-Agent", "TermChat-Updater/1.5")
+			req.Header.Set("User-Agent", "TermChat-Updater/1.6")
 			req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
 
 			resp, err := client.Do(req)
@@ -461,7 +486,7 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 			if rErr != nil {
 				continue
 			}
-			req.Header.Set("User-Agent", "TermChat-Updater/1.5")
+			req.Header.Set("User-Agent", "TermChat-Updater/1.6")
 			r, dErr := client.Do(req)
 			if dErr == nil && r.StatusCode == http.StatusOK {
 				resp = r
@@ -484,6 +509,11 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	defer resp.Body.Close()
 
 	totalSize := resp.ContentLength
+	finalURL, finalSize, _ := resolveFinalDownloadURL(activeClient, targetURL)
+	if finalSize > 0 {
+		totalSize = finalSize
+	}
+
 	if onProgress != nil {
 		if totalSize > 0 {
 			onProgress(fmt.Sprintf("[NET] Downloading TermChat update (%.1f MB)...", float64(totalSize)/(1024*1024)))
@@ -499,8 +529,7 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	}
 
 	if totalSize > 500000 {
-		resp.Body.Close()
-		multiBytes, mErr := downloadMultiThreaded(activeClient, targetURL, totalSize, pw)
+		multiBytes, mErr := downloadMultiThreaded(activeClient, finalURL, totalSize, pw)
 		if mErr == nil && len(multiBytes) > 100000 {
 			rawBytes = multiBytes
 		}
@@ -510,7 +539,6 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 		var downloadedData bytes.Buffer
 		destWriter := io.MultiWriter(&downloadedData, pw)
 		_, err = io.Copy(destWriter, resp.Body)
-		_ = resp.Body.Close()
 		if err != nil {
 			return "", fmt.Errorf("error reading download stream: %w", err)
 		}
