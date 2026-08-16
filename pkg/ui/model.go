@@ -636,6 +636,22 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		m.manager.SetEncryptionPassphrase(pass)
 		m.addSystemMsg("🔒 AES-256 End-to-End Encryption enabled!")
 
+	case "/get", "/download", "/dl", "/fetch":
+		if len(parts) < 2 {
+			m.addSystemMsg("Usage: /get <file_url>\nExample: /get https://termchat-o51d.onrender.com/files/abc123/file.zip")
+			return
+		}
+		fileURL := parts[1]
+		m.addSystemMsg(fmt.Sprintf("📥 Downloading file from %s...", fileURL))
+		go func() {
+			savedPath, err := m.manager.DownloadFileFromURL(fileURL)
+			if err != nil {
+				m.addSystemMsg(fmt.Sprintf("❌ Download failed: %v", err))
+			} else {
+				m.addSystemMsg(fmt.Sprintf("✅ Download complete! Saved to:\n   📁 %s", savedPath))
+			}
+		}()
+
 	case "/qr":
 		ips := network.GetLocalIPs()
 		mainIP := "127.0.0.1"

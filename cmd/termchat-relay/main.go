@@ -1,11 +1,16 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,14 +52,44 @@ type Room struct {
 }
 
 type Server struct {
-	rooms   map[string]*Room
-	roomsMu sync.RWMutex
+	rooms     map[string]*Room
+	roomsMu   sync.RWMutex
+	uploadDir string
+}
+
+func generateID() string {
+	bytes := make([]byte, 6)
+	_, _ = rand.Read(bytes)
+	return hex.EncodeToString(bytes)
 }
 
 func NewServer() *Server {
-	return &Server{
-		rooms: make(map[string]*Room),
+	uploadDir := "/tmp/termchat_uploads"
+	_ = os.MkdirAll(uploadDir, 0755)
+
+	s := &Server{
+		rooms:     make(map[string]*Room),
+		uploadDir: uploadDir,
 	}
+
+	// Auto-cleanup files older than 24h
+	go func() {
+		for {
+			time.Sleep(1 * time.Hour)
+			files, err := os.ReadDir(uploadDir)
+			if err == nil {
+				now := time.Now()
+				for _, f := range files {
+					info, err := f.Info()
+					if err == nil && now.Sub(info.ModTime()) > 24*time.Hour {
+						_ = os.RemoveAll(filepath.Join(uploadDir, f.Name()))
+					}
+				}
+			}
+		}
+	}()
+
+	return s
 }
 
 func (s *Server) getOrCreateRoom(name string) *Room {
@@ -118,6 +153,87 @@ func (s *Server) broadcastToRoom(roomName string, senderID string, msg []byte) {
 			}
 		}
 	}
+}
+
+func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// 100MB max memory/file
+	err := r.ParseMultipartForm(100 << 20)
+	if err != nil {
+		http.Error(w, "File too large (max 100MB)", http.StatusBadRequest)
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "Invalid file form", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
+
+	fileID := generateID()
+	cleanName := filepath.Base(header.Filename)
+	dirPath := filepath.Join(s.uploadDir, fileID)
+	_ = os.MkdirAll(dirPath, 0755)
+
+	destPath := filepath.Join(dirPath, cleanName)
+	destFile, err := os.Create(destPath)
+	if err != nil {
+		http.Error(w, "Failed to save file", http.StatusInternalServerError)
+		return
+	}
+	defer destFile.Close()
+
+	written, err := io.Copy(destFile, file)
+	if err != nil {
+		http.Error(w, "Failed to write file", http.StatusInternalServerError)
+		return
+	}
+
+	proto := "https"
+	if r.TLS == nil && !strings.HasPrefix(r.Header.Get("X-Forwarded-Proto"), "https") {
+		proto = "http"
+	}
+	host := r.Host
+	if r.Header.Get("X-Forwarded-Host") != "" {
+		host = r.Header.Get("X-Forwarded-Host")
+	}
+
+	downloadURL := fmt.Sprintf("%s://%s/files/%s/%s", proto, host, fileID, cleanName)
+
+	resp := map[string]interface{}{
+		"id":       fileID,
+		"filename": cleanName,
+		"size":     written,
+		"url":      downloadURL,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/files/"), "/")
+	if len(parts) < 2 {
+		http.NotFound(w, r)
+		return
+	}
+
+	fileID := parts[0]
+	fileName := parts[1]
+	filePath := filepath.Join(s.uploadDir, fileID, fileName)
+
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", fileName))
+	http.ServeFile(w, r, filePath)
 }
 
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
@@ -227,6 +343,8 @@ func main() {
 	server := NewServer()
 
 	http.HandleFunc("/ws", server.handleWS)
+	http.HandleFunc("/api/upload", server.handleUpload)
+	http.HandleFunc("/files/", server.handleDownload)
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		server.roomsMu.RLock()
 		totalRooms := len(server.rooms)
@@ -248,7 +366,8 @@ h1 { color: #7aa2f7; }
   <h1>⚡ TermChat Relay Server</h1>
   <p>Status: <span class="badge">● ONLINE (24/7)</span></p>
   <p>Active Rooms: <b>%d</b></p>
-  <p>WebSocket Endpoint: <code>/ws?room=&lt;room_name&gt;&name=&lt;nickname&gt;&id=&lt;id&gt;</code></p>
+  <p>WebSocket: <code>/ws?room=&lt;room_name&gt;&name=&lt;nickname&gt;&id=&lt;id&gt;</code></p>
+  <p>File Storage: <code>/api/upload</code> & <code>/files/&lt;id&gt;/&lt;name&gt;</code></p>
 </div>
 </body>
 </html>`, totalRooms)

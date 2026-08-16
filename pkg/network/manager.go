@@ -2,6 +2,7 @@ package network
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -9,7 +10,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -813,6 +816,160 @@ func (m *Manager) SendBotChat(botName, text string) error {
 	return m.SendPacket(p)
 }
 
+func (m *Manager) UploadFileToRelay(filePath string) (string, string, int64, error) {
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		return "", "", 0, err
+	}
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", "", 0, err
+	}
+	defer file.Close()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("file", filepath.Base(filePath))
+	if err != nil {
+		return "", "", 0, err
+	}
+
+	_, err = io.Copy(part, file)
+	if err != nil {
+		return "", "", 0, err
+	}
+	_ = writer.Close()
+
+	uploadURL := "https://termchat-o51d.onrender.com/api/upload"
+	if m.RelayURL != "" {
+		u := m.RelayURL
+		u = strings.Replace(u, "wss://", "https://", 1)
+		u = strings.Replace(u, "ws://", "http://", 1)
+		if idx := strings.Index(u, "/ws"); idx != -1 {
+			u = u[:idx]
+		}
+		uploadURL = u + "/api/upload"
+	}
+
+	req, err := http.NewRequest("POST", uploadURL, body)
+	if err != nil {
+		return "", "", 0, err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", 0, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", "", 0, fmt.Errorf("upload failed (%d): %s", resp.StatusCode, string(respBody))
+	}
+
+	var res struct {
+		ID       string `json:"id"`
+		FileName string `json:"filename"`
+		Size     int64  `json:"size"`
+		URL      string `json:"url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return "", "", 0, err
+	}
+
+	return res.URL, res.FileName, fileInfo.Size(), nil
+}
+
+func (m *Manager) DownloadFileFromURL(fileURL string) (string, error) {
+	resp, err := http.Get(fileURL)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("download failed with status %d", resp.StatusCode)
+	}
+
+	fileName := filepath.Base(fileURL)
+	if idx := strings.Index(fileName, "?"); idx != -1 {
+		fileName = fileName[:idx]
+	}
+	if fileName == "" || fileName == "." || fileName == "/" {
+		fileName = "downloaded_file"
+	}
+
+	targetPath := getUniqueFilePath(m.DownloadDir, fileName)
+	out, err := os.Create(targetPath)
+	if err != nil {
+		return "", err
+	}
+	defer out.Close()
+
+	totalSize := resp.ContentLength
+	fileID := GenerateID()
+
+	if m.events.OnFileProgress != nil {
+		m.events.OnFileProgress(FileTransferProgress{
+			FileID:     fileID,
+			FileName:   fileName,
+			TotalBytes: totalSize,
+			DoneBytes:  0,
+			IsIncoming: true,
+			IsDone:     false,
+		})
+	}
+
+	buf := make([]byte, 32*1024)
+	var written int64
+
+	for {
+		n, readErr := resp.Body.Read(buf)
+		if n > 0 {
+			wN, wErr := out.Write(buf[:n])
+			if wErr != nil {
+				return "", wErr
+			}
+			written += int64(wN)
+			if m.events.OnFileProgress != nil {
+				m.events.OnFileProgress(FileTransferProgress{
+					FileID:     fileID,
+					FileName:   fileName,
+					TotalBytes: totalSize,
+					DoneBytes:  written,
+					IsIncoming: true,
+					IsDone:     false,
+				})
+			}
+		}
+		if readErr != nil {
+			if readErr == io.EOF {
+				break
+			}
+			return "", readErr
+		}
+	}
+
+	if m.events.OnFileProgress != nil {
+		m.events.OnFileProgress(FileTransferProgress{
+			FileID:     fileID,
+			FileName:   fileName,
+			TotalBytes: totalSize,
+			DoneBytes:  written,
+			IsIncoming: true,
+			IsDone:     true,
+		})
+	}
+
+	if m.events.OnFileReceived != nil {
+		m.events.OnFileReceived(fileName, targetPath, written, "Cloud")
+	}
+
+	return targetPath, nil
+}
+
 func (m *Manager) SendFile(filePath string) error {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
@@ -822,6 +979,32 @@ func (m *Manager) SendFile(filePath string) error {
 		return fmt.Errorf("directories cannot be sent directly; please compress first")
 	}
 
+	fileName := filepath.Base(filePath)
+	fileSize := fileInfo.Size()
+
+	// 1. If in Cloud Room mode: upload to cloud and share interactive download card
+	if m.RoomName != "" {
+		go func() {
+			if m.events.OnSystemMsg != nil {
+				m.events.OnSystemMsg(fmt.Sprintf("☁️ Uploading '%s' (%s)...", fileName, FormatBytes(fileSize)))
+			}
+			dlURL, _, _, err := m.UploadFileToRelay(filePath)
+			if err != nil {
+				if m.events.OnSystemMsg != nil {
+					m.events.OnSystemMsg(fmt.Sprintf("❌ Upload failed: %v", err))
+				}
+				return
+			}
+			shareMsg := fmt.Sprintf("📦 Shared file: %s (%s)\n🔗 %s\n💡 Type `/get %s` or click the link to download", fileName, FormatBytes(fileSize), dlURL, dlURL)
+			_ = m.SendChat(shareMsg)
+			if m.events.OnSystemMsg != nil {
+				m.events.OnSystemMsg(fmt.Sprintf("✅ Uploaded and shared '%s' to room #%s!", fileName, m.RoomName))
+			}
+		}()
+		return nil
+	}
+
+	// 2. If in pure LAN mode: direct TCP peer streaming
 	m.peersMu.RLock()
 	peersCount := len(m.peers)
 	peersList := make([]*PeerConnection, 0, peersCount)
@@ -835,8 +1018,6 @@ func (m *Manager) SendFile(filePath string) error {
 	}
 
 	fileID := GenerateID()
-	fileName := filepath.Base(filePath)
-	fileSize := fileInfo.Size()
 
 	go func() {
 		file, err := os.Open(filePath)
