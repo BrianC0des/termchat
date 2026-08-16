@@ -34,6 +34,7 @@ const (
 
 type Packet struct {
 	Type      MsgType   `json:"type"`
+	Room      string    `json:"room,omitempty"`
 	SenderID  string    `json:"sender_id"`
 	Sender    string    `json:"sender"`
 	Timestamp time.Time `json:"timestamp"`

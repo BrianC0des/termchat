@@ -651,6 +651,88 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			m.showQR = true
 		}
 
+	case "/leave", "/offline":
+		m.manager.LeaveRoom()
+		var roomMsgs []ChatMessage
+		history := system.LoadHistory("", 60)
+		for _, h := range history {
+			roomMsgs = append(roomMsgs, ChatMessage{
+				SenderID:   h.SenderID,
+				SenderName: h.SenderName,
+				Content:    h.Content,
+				Timestamp:  h.Timestamp,
+				IsMe:       h.IsMe,
+				IsSystem:   h.IsSystem,
+				IsFile:     h.IsFile,
+			})
+		}
+		m.messages = roomMsgs
+		m.viewport.SetContent(m.renderMessages())
+		m.addSystemMsg("🏠 Switched to Offline Local Wi-Fi mode (Isolated LAN only).")
+
+	case "/mode":
+		if len(parts) < 2 {
+			current := "🏠 Offline Local Wi-Fi (LAN)"
+			if m.manager.RoomName != "" {
+				current = fmt.Sprintf("🌐 Online Cloud Room #%s", m.manager.RoomName)
+			}
+			m.addSystemMsg(fmt.Sprintf("Current Mode: %s\nUsage: `/mode offline` (Local Wi-Fi) or `/mode online <room_name> [password]`", current))
+			return
+		}
+		modeType := strings.ToLower(parts[1])
+		if modeType == "offline" || modeType == "lan" || modeType == "local" {
+			m.manager.LeaveRoom()
+			var roomMsgs []ChatMessage
+			history := system.LoadHistory("", 60)
+			for _, h := range history {
+				roomMsgs = append(roomMsgs, ChatMessage{
+					SenderID:   h.SenderID,
+					SenderName: h.SenderName,
+					Content:    h.Content,
+					Timestamp:  h.Timestamp,
+					IsMe:       h.IsMe,
+					IsSystem:   h.IsSystem,
+					IsFile:     h.IsFile,
+				})
+			}
+			m.messages = roomMsgs
+			m.viewport.SetContent(m.renderMessages())
+			m.addSystemMsg("🏠 Switched to Offline Local Wi-Fi mode (Isolated LAN only).")
+		} else if modeType == "online" || modeType == "cloud" {
+			if len(parts) < 3 {
+				m.addSystemMsg("Usage: /mode online <room_name> [optional_password]")
+				return
+			}
+			newRoom := parts[2]
+			relay := m.manager.RelayURL
+			if relay == "" {
+				relay = "wss://termchat-o51d.onrender.com/ws"
+			}
+			var roomMsgs []ChatMessage
+			history := system.LoadHistory(newRoom, 60)
+			for _, h := range history {
+				roomMsgs = append(roomMsgs, ChatMessage{
+					SenderID:   h.SenderID,
+					SenderName: h.SenderName,
+					Content:    h.Content,
+					Timestamp:  h.Timestamp,
+					IsMe:       h.IsMe,
+					IsSystem:   h.IsSystem,
+					IsFile:     h.IsFile,
+				})
+			}
+			m.messages = roomMsgs
+			m.viewport.SetContent(m.renderMessages())
+			m.manager.ConnectRelay(relay, newRoom)
+			if len(parts) >= 4 {
+				m.manager.SetEncryptionPassphrase(parts[3])
+				m.addSystemMsg(fmt.Sprintf("☁️ Switched to Online Cloud Room #%s (🔒 Encrypted)", newRoom))
+			} else {
+				m.manager.SetEncryptionPassphrase("")
+				m.addSystemMsg(fmt.Sprintf("☁️ Switched to Online Cloud Room #%s", newRoom))
+			}
+		}
+
 	case "/room", "/create", "/join", "/channel":
 		if len(parts) < 2 {
 			if m.manager.RoomName != "" {
@@ -660,8 +742,28 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 				}
 				m.addSystemMsg(fmt.Sprintf("☁️ Currently in Room: #%s%s", m.manager.RoomName, lockInfo))
 			} else {
-				m.addSystemMsg("Usage: /room <room_name> [optional_password]\nExample: /room squad secret123")
+				m.addSystemMsg("Currently in: 🏠 Offline Local Wi-Fi (LAN)\nUsage: /room <room_name> [optional_password]\nExample: /room squad secret123\nTo leave: /leave")
 			}
+			return
+		}
+		if parts[1] == "leave" || parts[1] == "exit" {
+			m.manager.LeaveRoom()
+			var roomMsgs []ChatMessage
+			history := system.LoadHistory("", 60)
+			for _, h := range history {
+				roomMsgs = append(roomMsgs, ChatMessage{
+					SenderID:   h.SenderID,
+					SenderName: h.SenderName,
+					Content:    h.Content,
+					Timestamp:  h.Timestamp,
+					IsMe:       h.IsMe,
+					IsSystem:   h.IsSystem,
+					IsFile:     h.IsFile,
+				})
+			}
+			m.messages = roomMsgs
+			m.viewport.SetContent(m.renderMessages())
+			m.addSystemMsg("🏠 Left room. Switched to Offline Local Wi-Fi mode.")
 			return
 		}
 		newRoom := parts[1]

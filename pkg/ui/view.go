@@ -31,21 +31,37 @@ func (m *Model) View() string {
 	peers := m.manager.GetPeers()
 	peerCount := len(peers)
 
+	var modeBadge string
 	var statusBadge string
-	if peerCount > 0 {
-		statusBadge = lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")).Bold(true).
-			Render(fmt.Sprintf("● %d PEER(S) ONLINE", peerCount))
+	if m.manager.RoomName != "" {
+		modeBadge = lipgloss.NewStyle().Foreground(lipgloss.Color("#7AA2F7")).Bold(true).
+			Render(fmt.Sprintf("🌐 #%s", m.manager.RoomName))
+		if peerCount > 0 {
+			statusBadge = lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")).Bold(true).
+				Render(fmt.Sprintf("● %d IN ROOM", peerCount+1))
+		} else {
+			statusBadge = lipgloss.NewStyle().Foreground(lipgloss.Color("#7DCFFF")).Bold(true).
+				Render("☁️ CONNECTED (1)")
+		}
 	} else {
-		statusBadge = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true).
-			Render("○ SEARCHING ON WI-FI...")
+		modeBadge = lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A")).Bold(true).
+			Render("🏠 Local Wi-Fi")
+		if peerCount > 0 {
+			statusBadge = lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")).Bold(true).
+				Render(fmt.Sprintf("● %d ON LAN", peerCount))
+		} else {
+			statusBadge = lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Bold(true).
+				Render("○ SEARCHING LAN...")
+		}
 	}
 
 	headerLeft := lipgloss.JoinHorizontal(
 		lipgloss.Center,
 		TitleStyle.Render("⚡ TERMCHAT"),
 		" ",
+		modeBadge,
+		" ",
 		SubTitleStyle.Render(fmt.Sprintf("[%s]", m.manager.LocalName)),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Render(fmt.Sprintf(" :%d", m.manager.TCPPort)),
 	)
 
 	// Encryption status badge in header

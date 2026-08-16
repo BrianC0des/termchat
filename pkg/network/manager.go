@@ -369,6 +369,19 @@ func (m *Manager) handlePacket(p *PeerConnection, pkt *Packet) {
 		}
 	}
 
+	// Strict Room isolation filter:
+	// If packet is from direct LAN:
+	// - If we are in a Cloud Room (m.RoomName != ""): ignore LAN traffic so LAN devices don't leak into private room!
+	// - If we are in LAN mode (m.RoomName == ""): ignore private cloud room traffic.
+	if p.RemoteIP != "cloud-relay" && p.RemoteIP != "Cloud" {
+		if m.RoomName != "" && pkt.Room != m.RoomName && pkt.Type != MsgTypeHandshake && pkt.Type != MsgTypePing && pkt.Type != MsgTypePong {
+			return
+		}
+		if m.RoomName == "" && pkt.Room != "" && pkt.Type != MsgTypeHandshake && pkt.Type != MsgTypePing && pkt.Type != MsgTypePong {
+			return
+		}
+	}
+
 	switch pkt.Type {
 	case MsgTypeHandshake:
 		if pkt.SenderID == m.LocalID {
@@ -714,7 +727,22 @@ func (m *Manager) ConnectRelay(relayURL, roomName string) {
 	}()
 }
 
+func (m *Manager) LeaveRoom() {
+	m.relayMu.Lock()
+	if m.relayConn != nil {
+		_ = m.relayConn.Close()
+		m.relayConn = nil
+	}
+	m.relayMu.Unlock()
+
+	m.RoomName = ""
+	m.cloudPeersMu.Lock()
+	m.cloudPeers = make(map[string]*PeerConnection)
+	m.cloudPeersMu.Unlock()
+}
+
 func (m *Manager) SendPacket(p *Packet) error {
+	p.Room = m.RoomName
 	data, err := EncodePacket(p)
 	if err != nil {
 		return err
@@ -722,21 +750,23 @@ func (m *Manager) SendPacket(p *Packet) error {
 
 	sentCount := 0
 
-	// 1. Send to Cloud Relay if connected
-	m.relayMu.Lock()
-	if m.relayConn != nil {
-		_ = m.relayConn.WriteMessage(websocket.TextMessage, data)
-		sentCount++
+	// 1. If in Cloud Room mode: send ONLY to Cloud Relay
+	if m.RoomName != "" {
+		m.relayMu.Lock()
+		if m.relayConn != nil {
+			_ = m.relayConn.WriteMessage(websocket.TextMessage, data)
+			sentCount++
+		}
+		m.relayMu.Unlock()
+	} else {
+		// 2. If in pure Offline LAN mode: send ONLY to direct LAN peers
+		m.peersMu.RLock()
+		for _, peer := range m.peers {
+			_ = m.sendToPeer(peer, p)
+			sentCount++
+		}
+		m.peersMu.RUnlock()
 	}
-	m.relayMu.Unlock()
-
-	// 2. Send to direct LAN TCP peers
-	m.peersMu.RLock()
-	for _, peer := range m.peers {
-		_ = m.sendToPeer(peer, p)
-		sentCount++
-	}
-	m.peersMu.RUnlock()
 
 	if sentCount == 0 {
 		return fmt.Errorf("no connected peers or cloud relay")
@@ -942,19 +972,24 @@ func (m *Manager) sendToPeer(peer *PeerConnection, p *Packet) error {
 }
 
 func (m *Manager) GetPeers() []PeerConnection {
+	if m.RoomName != "" {
+		// In Cloud Room mode: show only members connected to this room
+		m.cloudPeersMu.RLock()
+		list := make([]PeerConnection, 0, len(m.cloudPeers))
+		for _, p := range m.cloudPeers {
+			list = append(list, *p)
+		}
+		m.cloudPeersMu.RUnlock()
+		return list
+	}
+
+	// In Offline LAN mode: show only local LAN peers
 	m.peersMu.RLock()
-	list := make([]PeerConnection, 0, len(m.peers)+len(m.cloudPeers))
+	list := make([]PeerConnection, 0, len(m.peers))
 	for _, p := range m.peers {
 		list = append(list, *p)
 	}
 	m.peersMu.RUnlock()
-
-	m.cloudPeersMu.RLock()
-	for _, p := range m.cloudPeers {
-		list = append(list, *p)
-	}
-	m.cloudPeersMu.RUnlock()
-
 	return list
 }
 
