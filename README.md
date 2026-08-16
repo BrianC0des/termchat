@@ -37,9 +37,9 @@ sudo curl -sSL https://github.com/BrianC0des/termchat/releases/download/v1.0.0/t
 
 ### 🪟 Windows (PowerShell)
 ```powershell
-mkdir -Force "$HOME\bin"; Invoke-WebRequest -Uri "https://github.com/BrianC0des/termchat/releases/download/v1.0.0/termchat-windows.exe" -OutFile "$HOME\bin\termchat.exe"; [Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";$HOME\bin", "User"); $env:Path += ";$HOME\bin"; termchat
+New-Item -ItemType Directory -Force "$HOME\bin"; curl.exe -sSL https://github.com/BrianC0des/termchat/releases/download/v1.0.0/termchat-windows.exe -o "$HOME\bin\termchat.exe"; & "$HOME\bin\termchat.exe"
 ```
-*(Or simply download and run `.\termchat.exe`)*
+*(Or simply download and double click `termchat-windows.exe` from Releases)*
 
 ---
 
