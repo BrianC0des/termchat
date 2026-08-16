@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -15,6 +16,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gorilla/websocket"
 )
 
@@ -53,9 +58,13 @@ type Room struct {
 }
 
 type Server struct {
-	rooms     map[string]*Room
-	roomsMu   sync.RWMutex
-	uploadDir string
+	rooms       map[string]*Room
+	roomsMu     sync.RWMutex
+	uploadDir   string
+	s3Client    *s3.Client
+	r2Bucket    string
+	r2PublicURL string
+	useR2       bool
 }
 
 func generateID() string {
@@ -73,7 +82,35 @@ func NewServer() *Server {
 		uploadDir: uploadDir,
 	}
 
-	// Auto-cleanup files older than 24h
+	// Initialize Cloudflare R2 / S3 if env vars provided
+	r2AccountID := os.Getenv("R2_ACCOUNT_ID")
+	r2AccessKey := os.Getenv("R2_ACCESS_KEY_ID")
+	r2SecretKey := os.Getenv("R2_SECRET_ACCESS_KEY")
+	r2Bucket := os.Getenv("R2_BUCKET_NAME")
+	r2PublicURL := os.Getenv("R2_PUBLIC_URL")
+
+	if r2AccountID != "" && r2AccessKey != "" && r2SecretKey != "" && r2Bucket != "" {
+		customEndpoint := fmt.Sprintf("https://%s.r2.cloudflarestorage.com", r2AccountID)
+		cfg, err := config.LoadDefaultConfig(context.TODO(),
+			config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(r2AccessKey, r2SecretKey, "")),
+			config.WithRegion("auto"),
+		)
+		if err == nil {
+			s.s3Client = s3.NewFromConfig(cfg, func(o *s3.Options) {
+				o.BaseEndpoint = aws.String(customEndpoint)
+			})
+			s.r2Bucket = r2Bucket
+			s.r2PublicURL = r2PublicURL
+			s.useR2 = true
+			log.Printf("☁️ Cloudflare R2 Object Storage active (Bucket: %s)", r2Bucket)
+		} else {
+			log.Printf("⚠️ Failed to initialize R2 S3 client: %v", err)
+		}
+	} else {
+		log.Printf("💾 Using local filesystem storage (%s)", uploadDir)
+	}
+
+	// Auto-cleanup local files older than 24h (if not using R2)
 	go func() {
 		for {
 			time.Sleep(1 * time.Hour)
@@ -178,6 +215,47 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	fileID := generateID()
 	cleanName := filepath.Base(header.Filename)
+
+	proto := "https"
+	if r.TLS == nil && !strings.HasPrefix(r.Header.Get("X-Forwarded-Proto"), "https") {
+		proto = "http"
+	}
+	host := r.Host
+	if r.Header.Get("X-Forwarded-Host") != "" {
+		host = r.Header.Get("X-Forwarded-Host")
+	}
+
+	if s.useR2 {
+		r2Key := fmt.Sprintf("files/%s/%s", fileID, cleanName)
+		_, err := s.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
+			Bucket:      aws.String(s.r2Bucket),
+			Key:         aws.String(r2Key),
+			Body:        file,
+			ContentType: aws.String(header.Header.Get("Content-Type")),
+		})
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to upload to Cloudflare R2: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		downloadURL := fmt.Sprintf("%s://%s/files/%s/%s", proto, host, fileID, url.PathEscape(cleanName))
+		if s.r2PublicURL != "" {
+			downloadURL = fmt.Sprintf("%s/%s", strings.TrimSuffix(s.r2PublicURL, "/"), r2Key)
+		}
+
+		resp := map[string]interface{}{
+			"id":       fileID,
+			"filename": cleanName,
+			"size":     header.Size,
+			"url":      downloadURL,
+			"storage":  "cloudflare_r2",
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
+		return
+	}
+
+	// Local filesystem storage fallback
 	dirPath := filepath.Join(s.uploadDir, fileID)
 	_ = os.MkdirAll(dirPath, 0755)
 
@@ -195,15 +273,6 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	proto := "https"
-	if r.TLS == nil && !strings.HasPrefix(r.Header.Get("X-Forwarded-Proto"), "https") {
-		proto = "http"
-	}
-	host := r.Host
-	if r.Header.Get("X-Forwarded-Host") != "" {
-		host = r.Header.Get("X-Forwarded-Host")
-	}
-
 	downloadURL := fmt.Sprintf("%s://%s/files/%s/%s", proto, host, fileID, url.PathEscape(cleanName))
 
 	resp := map[string]interface{}{
@@ -211,6 +280,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		"filename": cleanName,
 		"size":     written,
 		"url":      downloadURL,
+		"storage":  "local_disk",
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -229,13 +299,60 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	fileID := parts[0]
-	dirPath := filepath.Join(s.uploadDir, fileID)
-
-	var targetFile string
-	var fileName string
-
+	fileName := ""
 	if len(parts) >= 2 {
 		fileName = parts[1]
+	}
+
+	// 1. If using Cloudflare R2
+	if s.useR2 {
+		r2Key := fmt.Sprintf("files/%s/%s", fileID, fileName)
+		obj, err := s.s3Client.GetObject(r.Context(), &s3.GetObjectInput{
+			Bucket: aws.String(s.r2Bucket),
+			Key:    aws.String(r2Key),
+		})
+		if err != nil {
+			// Fallback: search key with prefix
+			prefix := fmt.Sprintf("files/%s/", fileID)
+			listOut, lErr := s.s3Client.ListObjectsV2(r.Context(), &s3.ListObjectsV2Input{
+				Bucket: aws.String(s.r2Bucket),
+				Prefix: aws.String(prefix),
+			})
+			if lErr == nil && len(listOut.Contents) > 0 {
+				r2Key = *listOut.Contents[0].Key
+				parts := strings.Split(r2Key, "/")
+				if len(parts) > 0 {
+					fileName = parts[len(parts)-1]
+				}
+				obj, err = s.s3Client.GetObject(r.Context(), &s3.GetObjectInput{
+					Bucket: aws.String(s.r2Bucket),
+					Key:    aws.String(r2Key),
+				})
+			}
+		}
+
+		if err != nil || obj == nil {
+			http.NotFound(w, r)
+			return
+		}
+		defer obj.Body.Close()
+
+		if obj.ContentType != nil {
+			w.Header().Set("Content-Type", *obj.ContentType)
+		}
+		if obj.ContentLength != nil {
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", *obj.ContentLength))
+		}
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", fileName))
+		_, _ = io.Copy(w, obj.Body)
+		return
+	}
+
+	// 2. Local filesystem storage
+	dirPath := filepath.Join(s.uploadDir, fileID)
+	var targetFile string
+
+	if fileName != "" {
 		filePath := filepath.Join(dirPath, fileName)
 		if _, err := os.Stat(filePath); err == nil {
 			targetFile = filePath
