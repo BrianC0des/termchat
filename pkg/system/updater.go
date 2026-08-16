@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const AppVersion = "v1.5.2"
+const AppVersion = "v1.6.0"
 
 type progressWriter struct {
 	total      int64
