@@ -950,6 +950,9 @@ func (m *Manager) DownloadFileFromURL(fileURL string) (string, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusNotFound {
+		return "", fmt.Errorf("file expired or was cleared during server restart (please ask sender to re-share)")
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("download failed with status %d", resp.StatusCode)
 	}
