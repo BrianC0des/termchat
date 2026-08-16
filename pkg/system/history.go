@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -18,18 +20,35 @@ type HistoryEntry struct {
 	IsFile     bool      `json:"is_file"`
 }
 
-func getHistoryPath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "./history.jsonl"
+var safeRoomRegex = regexp.MustCompile(`[^a-zA-Z0-9_\-]+`)
+
+func sanitizeRoomName(room string) string {
+	room = strings.TrimSpace(room)
+	if room == "" {
+		return "direct-lan"
 	}
-	dir := filepath.Join(home, ".local", "share", "termchat")
-	_ = os.MkdirAll(dir, 0755)
-	return filepath.Join(dir, "history.jsonl")
+	safe := safeRoomRegex.ReplaceAllString(room, "_")
+	if safe == "" {
+		return "room"
+	}
+	return safe
 }
 
-func AppendHistory(entry HistoryEntry) {
-	path := getHistoryPath()
+func getRoomHistoryPath(room string) string {
+	safeName := sanitizeRoomName(room)
+	home, err := os.UserHomeDir()
+	var dir string
+	if err != nil {
+		dir = "./termchat_data/rooms"
+	} else {
+		dir = filepath.Join(home, ".local", "share", "termchat", "rooms")
+	}
+	_ = os.MkdirAll(dir, 0755)
+	return filepath.Join(dir, safeName+".jsonl")
+}
+
+func AppendHistory(room string, entry HistoryEntry) {
+	path := getRoomHistoryPath(room)
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return
@@ -42,8 +61,8 @@ func AppendHistory(entry HistoryEntry) {
 	}
 }
 
-func LoadHistory(limit int) []HistoryEntry {
-	path := getHistoryPath()
+func LoadHistory(room string, limit int) []HistoryEntry {
+	path := getRoomHistoryPath(room)
 	file, err := os.Open(path)
 	if err != nil {
 		return nil

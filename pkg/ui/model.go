@@ -90,8 +90,8 @@ func NewModel(mgr *network.Manager) *Model {
 	ti.CharLimit = 100000
 	ti.Width = 60
 
-	// Load chat history
-	history := system.LoadHistory(60)
+	// Load chat history for the current room
+	history := system.LoadHistory(mgr.RoomName, 60)
 	var initialMsgs []ChatMessage
 	for _, h := range history {
 		initialMsgs = append(initialMsgs, ChatMessage{
@@ -271,7 +271,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			IsSystem:   false,
 		}
 		m.messages = append(m.messages, msgEntry)
-		system.AppendHistory(system.HistoryEntry{
+		system.AppendHistory(m.manager.RoomName, system.HistoryEntry{
 			SenderID:   msg.senderID,
 			SenderName: msg.senderName,
 			Content:    msg.text,
@@ -340,7 +340,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			IsSystem:   true,
 			IsFile:     true,
 		})
-		system.AppendHistory(system.HistoryEntry{
+		system.AppendHistory(m.manager.RoomName, system.HistoryEntry{
 			SenderName: msg.senderName,
 			Content:    notice,
 			Timestamp:  time.Now(),
@@ -422,7 +422,7 @@ func (m *Model) handleInput(text string) {
 			Timestamp:  time.Now(),
 			IsMe:       true,
 		})
-		system.AppendHistory(system.HistoryEntry{
+		system.AppendHistory(m.manager.RoomName, system.HistoryEntry{
 			SenderID:   m.manager.LocalID,
 			SenderName: m.manager.LocalName,
 			Content:    text,
@@ -664,9 +664,22 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			relay = "wss://termchat-o51d.onrender.com/ws"
 		}
 
-		// Clear previous room messages for a clean fresh room
-		m.messages = []ChatMessage{}
-		m.viewport.SetContent("")
+		// Load isolated history for this room
+		var roomMsgs []ChatMessage
+		history := system.LoadHistory(newRoom, 60)
+		for _, h := range history {
+			roomMsgs = append(roomMsgs, ChatMessage{
+				SenderID:   h.SenderID,
+				SenderName: h.SenderName,
+				Content:    h.Content,
+				Timestamp:  h.Timestamp,
+				IsMe:       h.IsMe,
+				IsSystem:   h.IsSystem,
+				IsFile:     h.IsFile,
+			})
+		}
+		m.messages = roomMsgs
+		m.viewport.SetContent(m.renderMessages())
 
 		m.manager.ConnectRelay(relay, newRoom)
 
@@ -674,10 +687,10 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		if len(parts) >= 3 {
 			pass := parts[2]
 			m.manager.SetEncryptionPassphrase(pass)
-			m.addSystemMsg(fmt.Sprintf("☁️ Switched to clean Room #%s with 🔒 AES-256 Encryption!", newRoom))
+			m.addSystemMsg(fmt.Sprintf("☁️ Switched to Room #%s with 🔒 AES-256 Encryption!", newRoom))
 		} else {
 			m.manager.SetEncryptionPassphrase("")
-			m.addSystemMsg(fmt.Sprintf("☁️ Switched to clean Room #%s", newRoom))
+			m.addSystemMsg(fmt.Sprintf("☁️ Switched to Room #%s", newRoom))
 		}
 
 	case "/clear":
@@ -822,7 +835,7 @@ func (m *Model) handleAGYMention(text string) {
 				Content:    reply,
 				Timestamp:  time.Now(),
 			})
-			system.AppendHistory(system.HistoryEntry{
+			system.AppendHistory(m.manager.RoomName, system.HistoryEntry{
 				SenderID:   "agy-bot",
 				SenderName: "🤖 AGY",
 				Content:    reply,
