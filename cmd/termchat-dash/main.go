@@ -133,7 +133,7 @@ func initialModel() model {
 		lastUpdated: time.Now(),
 		logs: []string{
 			fmt.Sprintf("%s [SYS] Dashboard engine initialized", time.Now().Format("15:04:05")),
-			fmt.Sprintf("%s [NET] Explicit repository target: BrianC0des/termchat", time.Now().Format("15:04:05")),
+			fmt.Sprintf("%s [NET] Explicit Fastly CDN endpoint configured", time.Now().Format("15:04:05")),
 		},
 	}
 }
@@ -186,7 +186,6 @@ func fetchReleaseDataCmd() tea.Cmd {
 		totalDownloads := 0
 		stars := 0
 
-		// Query GitHub CLI with explicit repository parameter (-R BrianC0des/termchat)
 		ghOut, ghErr := exec.Command("gh", "release", "view", "-R", "BrianC0des/termchat", "--json", "assets,tagName").CombinedOutput()
 		if ghErr == nil && len(ghOut) > 0 {
 			var rel ghReleaseJSON
@@ -200,32 +199,6 @@ func fetchReleaseDataCmd() tea.Cmd {
 					assetDlMap[a.Name] = a.DownloadCount
 					if strings.HasPrefix(a.Digest, "sha256:") {
 						assetShaMap[a.Name] = strings.ToUpper(a.Digest[7:15])
-					}
-				}
-			}
-		} else {
-			// Fallback: Query GitHub API directly
-			req, _ := http.NewRequest("GET", "https://api.github.com/repos/BrianC0des/termchat/releases/latest", nil)
-			req.Header.Set("User-Agent", "TermChat-Dashboard/1.8")
-			client := &http.Client{Timeout: 5 * time.Second}
-			if resp, rErr := client.Do(req); rErr == nil && resp.StatusCode == http.StatusOK {
-				defer resp.Body.Close()
-				var rel struct {
-					TagName string `json:"tag_name"`
-					Assets  []struct {
-						Name          string `json:"name"`
-						Size          int64  `json:"size"`
-						DownloadCount int    `json:"download_count"`
-					} `json:"assets"`
-				}
-				if json.NewDecoder(resp.Body).Decode(&rel) == nil {
-					if rel.TagName != "" {
-						targetTag = rel.TagName
-					}
-					for _, a := range rel.Assets {
-						totalDownloads += a.DownloadCount
-						assetSizeMap[a.Name] = a.Size
-						assetDlMap[a.Name] = a.DownloadCount
 					}
 				}
 			}
@@ -259,7 +232,6 @@ func fetchReleaseDataCmd() tea.Cmd {
 						platforms[i].Sha256 = sha
 					}
 				} else {
-					// Fallback to uncompressed binary if asset is uploaded as raw executable
 					rawAsset := strings.TrimSuffix(p.Asset, ".tar.zst")
 					rawAsset = strings.TrimSuffix(rawAsset, ".zip")
 					if sz, ok := assetSizeMap[rawAsset]; ok && sz > 100000 {
@@ -310,7 +282,7 @@ func fetchMirrorPingCmd(relayURL string) tea.Cmd {
 
 		return mirrorPingMsg{
 			githubMs: pingHost("https://api.github.com/zen"),
-			fastlyMs: pingHost("https://raw.githubusercontent.com"),
+			fastlyMs: pingHost("https://raw.githubusercontent.com/BrianC0des/termchat/main/go.mod"),
 			googleMs: pingHost("https://google.com"),
 			relayMs:  pingHost(httpRelay),
 		}
@@ -395,11 +367,9 @@ func (m model) View() string {
 		containerWidth = 80
 	}
 
-	// 1. Top Title Bar
 	topBar := titleStyle.Render("TERMCHAT OPERATIONS DASHBOARD") +
 		subtitleStyle.Render(fmt.Sprintf("Last Sync: %s │ [R]efresh [F]ilter: %-4s [C]lear [Q]uit", m.lastUpdated.Format("15:04:05"), m.logFilter))
 
-	// 2. Summary Bar
 	readyCount := 0
 	for _, p := range m.platforms {
 		if p.Status == "READY" {
@@ -416,7 +386,6 @@ func (m model) View() string {
 	)
 	summaryBox := boxStyle.Width(containerWidth - 2).Render(summaryText)
 
-	// 3. Section 1: ALL-OS Platform Matrix Table
 	tableHeaderRow := lipgloss.JoinHorizontal(lipgloss.Left,
 		colPlatformStyle.Render("PLATFORM TARGET"),
 		colStatusStyle.Render("STATUS"),
@@ -465,7 +434,6 @@ func (m model) View() string {
 		headerStyle.Render(fmt.Sprintf("📦 ALL-OS PLATFORM RELEASE MATRIX  (%d/%d PUBLISHED)", readyCount, len(m.platforms))) + "\n\n" + matrixContent,
 	)
 
-	// 4. Section 2: Infrastructure & Latency Metrics Card
 	infraRows := []string{
 		fmt.Sprintf("%-24s %s", labelStyle.Render("Relay Server (ws):"), formatPing(m.relayMs)),
 		fmt.Sprintf("%-24s %s", labelStyle.Render("Fastly Edge CDN:"), formatPing(m.fastlyMs)),
@@ -479,7 +447,6 @@ func (m model) View() string {
 		headerStyle.Render("📊 MULTI-MIRROR LATENCY & INFRASTRUCTURE") + "\n\n" + strings.Join(infraRows, "\n"),
 	)
 
-	// 5. Section 3: Live System Telemetry Stream (Filtered)
 	var filteredLogs []string
 	for _, l := range m.logs {
 		if m.logFilter == "ALL" || strings.Contains(l, "["+m.logFilter+"]") {
