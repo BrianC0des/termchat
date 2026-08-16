@@ -957,7 +957,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 	case "/clip", "/c":
 		clipText, err := system.ReadClipboard()
 		if err != nil || clipText == "" {
-			m.addSystemMsg("📋 Local clipboard is empty or inaccessible")
+			m.addSystemMsg("[CLIP] Local clipboard is empty or inaccessible")
 			return
 		}
 		p := &network.Packet{
@@ -968,13 +968,13 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			Content:   clipText,
 		}
 		if err := m.manager.SendPacket(p); err != nil {
-			m.addSystemMsg(fmt.Sprintf("❌ Could not sync clipboard: %v", err))
+			m.addSystemMsg(fmt.Sprintf("[ERR] Could not sync clipboard: %v", err))
 		} else {
 			preview := clipText
 			if len(preview) > 60 {
 				preview = preview[:57] + "..."
 			}
-			m.addSystemMsg(fmt.Sprintf("📋 Synced local clipboard to peers: \"%s\"", preview))
+			m.addSystemMsg(fmt.Sprintf("[CLIP] Synced local clipboard to peers: \"%s\"", preview))
 		}
 
 	case "/notify":
@@ -991,7 +991,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			Content:   msg,
 		}
 		_ = m.manager.SendPacket(p)
-		m.addSystemMsg(fmt.Sprintf("🔔 Notification sent: \"%s\"", msg))
+		m.addSystemMsg(fmt.Sprintf("[NOTIFY] Notification sent: \"%s\"", msg))
 
 	case "/ring", "/vibrate", "/find":
 		p := &network.Packet{
@@ -1001,7 +1001,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			Timestamp: time.Now(),
 		}
 		_ = m.manager.SendPacket(p)
-		m.addSystemMsg("🔔 Triggered ring/vibrate alert on connected devices!")
+		m.addSystemMsg("[NOTIFY] Triggered ring/vibrate alert on connected devices!")
 
 	case "/open", "/url":
 		if len(parts) < 2 {
@@ -1020,7 +1020,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			URL:       url,
 		}
 		_ = m.manager.SendPacket(p)
-		m.addSystemMsg(fmt.Sprintf("🌐 Opening URL on peer: %s", url))
+		m.addSystemMsg(fmt.Sprintf("[NET] Opening URL on peer: %s", url))
 
 	case "/play", "/pause", "/next", "/prev":
 		action := "play-pause"
@@ -1037,7 +1037,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			Action:    action,
 		}
 		_ = m.manager.SendPacket(p)
-		m.addSystemMsg(fmt.Sprintf("🎵 Sent media command: %s", action))
+		m.addSystemMsg(fmt.Sprintf("[AUDIO] Sent media command: %s", action))
 
 	case "/exec", "/sh":
 		if len(parts) < 2 {
@@ -1053,7 +1053,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			Content:   shCmd,
 		}
 		_ = m.manager.SendPacket(p)
-		m.addSystemMsg(fmt.Sprintf("💻 Running remote command: `%s`...", shCmd))
+		m.addSystemMsg(fmt.Sprintf("[EXEC] Running remote command: `%s`...", shCmd))
 
 	case "/update", "/upgrade":
 		go func() {
@@ -1061,7 +1061,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 				m.addSystemMsg(progressMsg)
 			})
 			if err != nil {
-				m.addSystemMsg(fmt.Sprintf("❌ Update failed: %v", err))
+				m.addSystemMsg(fmt.Sprintf("[ERR] Update failed: %v", err))
 			} else {
 				m.addSystemMsg(msg)
 			}
@@ -1070,17 +1070,17 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 	case "/auth", "/pass":
 		if len(parts) < 2 {
 			m.manager.SetEncryptionPassphrase("")
-			m.addSystemMsg("🔓 Encryption disabled (plain LAN mode)")
+			m.addSystemMsg("[UNLOCKED] Encryption disabled (plain LAN mode)")
 			return
 		}
 		pass := parts[1]
 		m.manager.SetEncryptionPassphrase(pass)
-		m.addSystemMsg("🔒 AES-256 End-to-End Encryption enabled!")
+		m.addSystemMsg("[AES-256] End-to-End Encryption enabled!")
 
 	case "/files", "/shared", "/vault", "/downloads":
 		m.refreshSharedFiles()
 		if len(m.sharedFiles) == 0 {
-			m.addSystemMsg("📁 No shared files in this room yet. Press `Ctrl + O` or type `/send <path>` to share a file!")
+			m.addSystemMsg("[FILES] No shared files in this room yet. Press `Ctrl + O` or type `/send <path>` to share a file!")
 		} else {
 			m.showFilesModal = true
 		}
@@ -1098,20 +1098,20 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		if num, err := strconv.Atoi(target); err == nil {
 			if num >= 1 && num <= len(m.sharedFiles) {
 				fileURL = m.sharedFiles[num-1].URL
-				m.addSystemMsg(fmt.Sprintf("📥 Selected file #%d: '%s'", num, m.sharedFiles[num-1].FileName))
+				m.addSystemMsg(fmt.Sprintf("[RECV] Selected file #%d: '%s'", num, m.sharedFiles[num-1].FileName))
 			} else {
-				m.addSystemMsg(fmt.Sprintf("❌ Invalid file number #%d. Room has %d shared files. Press Ctrl+F to browse.", num, len(m.sharedFiles)))
+				m.addSystemMsg(fmt.Sprintf("[ERR] Invalid file number #%d. Room has %d shared files. Press Ctrl+F to browse.", num, len(m.sharedFiles)))
 				return
 			}
 		}
 
-		m.addSystemMsg(fmt.Sprintf("📥 Downloading file from %s...", fileURL))
+		m.addSystemMsg(fmt.Sprintf("[RECV] Downloading file from %s...", fileURL))
 		go func(url string) {
 			savedPath, err := m.manager.DownloadFileFromURL(url)
 			if err != nil {
-				m.addSystemMsg(fmt.Sprintf("❌ Download failed: %v", err))
+				m.addSystemMsg(fmt.Sprintf("[ERR] Download failed: %v", err))
 			} else {
-				m.addSystemMsg(fmt.Sprintf("✅ Download complete! Saved to:\n   📁 %s", savedPath))
+				m.addSystemMsg(fmt.Sprintf("[OK] Download complete! Saved to:\n   [DIR] %s", savedPath))
 			}
 		}(fileURL)
 
@@ -1124,7 +1124,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		qrStr := fmt.Sprintf("termchat://%s:%d", mainIP, m.manager.TCPPort)
 		asciiQR, err := system.GenerateAsciiQR(qrStr)
 		if err != nil {
-			m.addSystemMsg(fmt.Sprintf("❌ Error generating QR: %v", err))
+			m.addSystemMsg(fmt.Sprintf("[ERR] Error generating QR: %v", err))
 		} else {
 			m.qrContent = fmt.Sprintf("Scan or connect to:\n%s:%d\n\n%s", mainIP, m.manager.TCPPort, asciiQR)
 			m.showQR = true
@@ -1147,13 +1147,13 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		}
 		m.messages = roomMsgs
 		m.viewport.SetContent(m.renderMessages())
-		m.addSystemMsg("🏠 Switched to Offline Local Wi-Fi (LAN Direct Turbo Mode).")
+		m.addSystemMsg("[LAN] Switched to Offline Local Wi-Fi (LAN Direct Mode).")
 
 	case "/mode":
 		if len(parts) < 2 {
-			current := "🏠 Offline Local Wi-Fi (LAN)"
+			current := "[LAN] Offline Local Wi-Fi"
 			if m.manager.RoomName != "" {
-				current = fmt.Sprintf("🌐 Online Cloud Room #%s", m.manager.RoomName)
+				current = fmt.Sprintf("[ROOM] Online Cloud Room #%s", m.manager.RoomName)
 			}
 			m.addSystemMsg(fmt.Sprintf("Current Mode: %s\nUsage: `/mode offline` (Local Wi-Fi) or `/mode online <room_name> [password]`", current))
 			return
@@ -1176,7 +1176,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			}
 			m.messages = roomMsgs
 			m.viewport.SetContent(m.renderMessages())
-			m.addSystemMsg("🏠 Switched to Offline Local Wi-Fi mode (Isolated LAN only).")
+			m.addSystemMsg("[LAN] Switched to Offline Local Wi-Fi mode.")
 		} else if modeType == "online" || modeType == "cloud" {
 			if len(parts) < 3 {
 				m.addSystemMsg("Usage: /mode online <room_name> [optional_password]")
@@ -1205,10 +1205,10 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			m.manager.ConnectRelay(relay, newRoom)
 			if len(parts) >= 4 {
 				m.manager.SetEncryptionPassphrase(parts[3])
-				m.addSystemMsg(fmt.Sprintf("☁️ Switched to Online Cloud Room #%s (🔒 Encrypted)", newRoom))
+				m.addSystemMsg(fmt.Sprintf("[ROOM] Switched to Cloud Room #%s ([AES-256] Encrypted)", newRoom))
 			} else {
 				m.manager.SetEncryptionPassphrase("")
-				m.addSystemMsg(fmt.Sprintf("☁️ Switched to Online Cloud Room #%s", newRoom))
+				m.addSystemMsg(fmt.Sprintf("[ROOM] Switched to Cloud Room #%s", newRoom))
 			}
 		}
 
@@ -1217,11 +1217,11 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			if m.manager.RoomName != "" {
 				lockInfo := ""
 				if m.manager.EncryptionKey != nil {
-					lockInfo = " (🔒 Encrypted)"
+					lockInfo = " ([AES-256] Encrypted)"
 				}
-				m.addSystemMsg(fmt.Sprintf("☁️ Currently in Room: #%s%s", m.manager.RoomName, lockInfo))
+				m.addSystemMsg(fmt.Sprintf("[ROOM] Currently in Room: #%s%s", m.manager.RoomName, lockInfo))
 			} else {
-				m.addSystemMsg("Currently in: 🏠 Offline Local Wi-Fi (LAN)\nUsage: /room <room_name> [optional_password]\nExample: /room squad secret123\nTo leave: /leave")
+				m.addSystemMsg("Currently in: [LAN] Offline Local Wi-Fi\nUsage: /room <room_name> [optional_password]\nExample: /room squad secret123\nTo leave: /leave")
 			}
 			return
 		}
@@ -1242,7 +1242,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			}
 			m.messages = roomMsgs
 			m.viewport.SetContent(m.renderMessages())
-			m.addSystemMsg("🏠 Left room. Switched to Offline Local Wi-Fi mode.")
+			m.addSystemMsg("[LAN] Left room. Switched to Offline Local Wi-Fi mode.")
 			return
 		}
 		newRoom := parts[1]
@@ -1274,10 +1274,10 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		if len(parts) >= 3 {
 			pass := parts[2]
 			m.manager.SetEncryptionPassphrase(pass)
-			m.addSystemMsg(fmt.Sprintf("☁️ Switched to Room #%s with 🔒 AES-256 Encryption!", newRoom))
+			m.addSystemMsg(fmt.Sprintf("[ROOM] Switched to Room #%s with [AES-256] Encryption!", newRoom))
 		} else {
 			m.manager.SetEncryptionPassphrase("")
-			m.addSystemMsg(fmt.Sprintf("☁️ Switched to Room #%s", newRoom))
+			m.addSystemMsg(fmt.Sprintf("[ROOM] Switched to Room #%s", newRoom))
 		}
 
 	case "/clear":
@@ -1294,7 +1294,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		cfg := system.LoadConfig()
 		cfg.Nickname = newName
 		system.SaveConfig(cfg)
-		m.addSystemMsg(fmt.Sprintf("🏷️ Changed nickname to '%s' (saved as permanent default)", newName))
+		m.addSystemMsg(fmt.Sprintf("[NICK] Changed nickname to '%s' (saved as default)", newName))
 
 	case "/connect":
 		if len(parts) < 2 {
@@ -1305,7 +1305,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		if !strings.Contains(target, ":") {
 			target = fmt.Sprintf("%s:7332", target)
 		}
-		m.addSystemMsg(fmt.Sprintf("🔗 Connecting to %s...", target))
+		m.addSystemMsg(fmt.Sprintf("[NET] Connecting to %s...", target))
 		cfg := system.LoadConfig()
 		cfg.LastRemotePeer = target
 		system.SaveConfig(cfg)
@@ -1348,14 +1348,14 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 
 		err := m.manager.SendFileWithExpiry(filePath, expiry)
 		if err != nil {
-			m.addSystemMsg(fmt.Sprintf("❌ Send file error: %v", err))
+			m.addSystemMsg(fmt.Sprintf("[ERR] Send file error: %v", err))
 		} else {
-			m.addSystemMsg(fmt.Sprintf("📤 Uploading '%s' (Expires: %s)...", filepath.Base(filePath), expiry))
+			m.addSystemMsg(fmt.Sprintf("[SEND] Uploading '%s' (Expires: %s)...", filepath.Base(filePath), expiry))
 		}
 
 	case "/dir":
 		if len(parts) < 2 {
-			m.addSystemMsg(fmt.Sprintf("📁 Current downloads folder: %s\nChange with: /dir <path>", m.manager.DownloadDir))
+			m.addSystemMsg(fmt.Sprintf("[DIR] Current downloads folder: %s\nChange with: /dir <path>", m.manager.DownloadDir))
 			return
 		}
 		newDir := strings.Join(parts[1:], " ")
@@ -1366,7 +1366,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		}
 		_ = os.MkdirAll(newDir, 0755)
 		m.manager.DownloadDir = newDir
-		m.addSystemMsg(fmt.Sprintf("📁 Download directory updated to: %s", newDir))
+		m.addSystemMsg(fmt.Sprintf("[DIR] Download directory updated to: %s", newDir))
 
 	case "/peers", "/members", "/users", "/who":
 		peers := m.manager.GetPeers()
@@ -1375,17 +1375,17 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		if m.manager.RoomName != "" {
 			roomInfo = "#" + m.manager.RoomName
 		}
-		sb.WriteString(fmt.Sprintf("👥 Room Members in %s (%d online):\n", roomInfo, len(peers)+1))
-		sb.WriteString(fmt.Sprintf("   • %s (You) [👑 Online]\n", m.manager.LocalName))
+		sb.WriteString(fmt.Sprintf("[USERS] Room Members in %s (%d online):\n", roomInfo, len(peers)+1))
+		sb.WriteString(fmt.Sprintf("   • %s (You) [ME]\n", m.manager.LocalName))
 		for _, p := range peers {
-			sb.WriteString(fmt.Sprintf("   • %s (%s) [🟢 Online]\n", p.Name, p.RemoteIP))
+			sb.WriteString(fmt.Sprintf("   • %s (%s) [ON]\n", p.Name, p.RemoteIP))
 		}
 		m.addSystemMsg(strings.TrimRight(sb.String(), "\n"))
 
 	case "/ip":
 		ips := network.GetLocalIPs()
 		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("🌐 Local IP Addresses (Port %d):\n", m.manager.TCPPort))
+		sb.WriteString(fmt.Sprintf("[NET] Local IP Addresses (Port %d):\n", m.manager.TCPPort))
 		for _, ip := range ips {
 			sb.WriteString(fmt.Sprintf("   • %s:%d\n", ip, m.manager.TCPPort))
 		}
@@ -1404,7 +1404,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		os.Exit(0)
 
 	default:
-		m.addSystemMsg(fmt.Sprintf("❓ Unknown command '%s'. Type /help for available commands.", command))
+		m.addSystemMsg(fmt.Sprintf("[?] Unknown command '%s'. Type /help for available commands.", command))
 	}
 }
 
@@ -1424,30 +1424,29 @@ func (m *Model) handleAGYMention(text string) {
 		cleanPrompt = "Hello! How can I help you today?"
 	}
 
-	m.addSystemMsg("🤖 AGY is thinking...")
-
+	m.addSystemMsg("[AI] AGY is thinking...")
 	go func() {
 		reply, err := system.QueryAGY(cleanPrompt)
 		if err != nil {
-			errText := fmt.Sprintf("⚠️ AGY error: %v", err)
-			_ = m.manager.SendBotChat("🤖 AGY", errText)
+			errText := fmt.Sprintf("[WARN] AGY error: %v", err)
+			_ = m.manager.SendBotChat("[AI] AGY", errText)
 			m.messages = append(m.messages, ChatMessage{
 				SenderID:   "agy-bot",
-				SenderName: "🤖 AGY",
+				SenderName: "[AI] AGY",
 				Content:    errText,
 				Timestamp:  time.Now(),
 			})
 		} else {
-			_ = m.manager.SendBotChat("🤖 AGY", reply)
+			_ = m.manager.SendBotChat("[AI] AGY", reply)
 			m.messages = append(m.messages, ChatMessage{
 				SenderID:   "agy-bot",
-				SenderName: "🤖 AGY",
+				SenderName: "[AI] AGY",
 				Content:    reply,
 				Timestamp:  time.Now(),
 			})
 			system.AppendHistory(m.manager.RoomName, system.HistoryEntry{
 				SenderID:   "agy-bot",
-				SenderName: "🤖 AGY",
+				SenderName: "[AI] AGY",
 				Content:    reply,
 				Timestamp:  time.Now(),
 			})

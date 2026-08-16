@@ -137,8 +137,8 @@ func (fp *FilePicker) View(width, height int) string {
 	boxWidth := min(width-4, 72)
 	boxHeight := min(height-4, 22)
 
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(PrimaryColor).Padding(0, 1).Render("📂 SELECT FILE TO SEND")
-	currentDirStr := lipgloss.NewStyle().Foreground(lipgloss.Color("#7AA2F7")).Bold(true).Render(fp.CurrentDir)
+	title := TitleStyle.Render(":: SELECT FILE TO SEND ::")
+	currentDirStr := lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).Render(fp.CurrentDir)
 
 	var listLines []string
 	visibleCount := boxHeight - 7
@@ -154,22 +154,22 @@ func (fp *FilePicker) View(width, height int) string {
 
 	for i := startIdx; i < endIdx; i++ {
 		item := fp.Items[i]
-		icon := "📄 "
+		icon := "[FILE] "
 		if item.IsDir {
-			icon = "📁 "
+			icon = "[DIR]  "
 		} else {
 			ext := strings.ToLower(filepath.Ext(item.Name))
 			switch ext {
 			case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg":
-				icon = "🖼️ "
+				icon = "[IMG]  "
 			case ".zip", ".tar", ".gz", ".7z", ".apk":
-				icon = "📦 "
+				icon = "[ZIP]  "
 			case ".mp3", ".wav", ".flac", ".ogg":
-				icon = "🎵 "
+				icon = "[AUD]  "
 			case ".mp4", ".mkv", ".webm", ".avi":
-				icon = "🎬 "
+				icon = "[VID]  "
 			case ".pdf", ".doc", ".docx", ".txt", ".md":
-				icon = "📝 "
+				icon = "[DOC]  "
 			}
 		}
 
@@ -180,7 +180,7 @@ func (fp *FilePicker) View(width, height int) string {
 
 		sizeStr := ""
 		if !item.IsDir {
-			sizeStr = lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Render(network.FormatBytes(item.Size))
+			sizeStr = lipgloss.NewStyle().Foreground(MutedColor).Render(network.FormatBytes(item.Size))
 		}
 
 		gap := boxWidth - lipgloss.Width(nameStr) - lipgloss.Width(sizeStr) - 10
@@ -193,13 +193,13 @@ func (fp *FilePicker) View(width, height int) string {
 		if i == fp.Cursor {
 			listLines = append(listLines, lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("#FFFFFF")).
-				Background(lipgloss.Color("#3B4261")).
+				Foreground(PrimaryColor).
+				Background(BgLight).
 				Width(boxWidth-4).
-				Render(" ❯ "+lineContent))
+				Render(" > "+lineContent))
 		} else {
 			listLines = append(listLines, lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#C0CAF5")).
+				Foreground(MessageText.GetForeground()).
 				Width(boxWidth-4).
 				Render("   "+lineContent))
 		}
