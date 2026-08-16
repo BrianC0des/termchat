@@ -92,30 +92,30 @@ func GetFileIcon(fileName string) string {
 	}
 	switch ext {
 	case ".zip", ".tar", ".gz", ".tgz", ".rar", ".7z", ".bz2", ".xz":
-		return "📦 [Archive]"
+		return "[ZIP]"
 	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".bmp":
-		return "🖼️ [Image]"
+		return "[IMG]"
 	case ".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv":
-		return "🎬 [Video]"
+		return "[VID]"
 	case ".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac":
-		return "🎵 [Audio]"
+		return "[AUD]"
 	case ".pdf":
-		return "📕 [PDF]"
+		return "[PDF]"
 	case ".doc", ".docx", ".odt", ".rtf":
-		return "📘 [Word]"
+		return "[DOC]"
 	case ".xls", ".xlsx", ".csv", ".ods":
-		return "📊 [Sheet]"
+		return "[CSV]"
 	case ".ppt", ".pptx", ".odp":
-		return "📙 [Slides]"
+		return "[PPT]"
 	case ".go", ".rs", ".py", ".js", ".ts", ".jsx", ".tsx", ".html", ".css", ".c", ".cpp", ".h", ".json", ".yaml", ".yml", ".sh", ".bash", ".sql":
-		return "💻 [Code]"
+		return "[CODE]"
 	case ".apk", ".aab":
-		return "📱 [Android App]"
+		return "[APK]"
 	case ".exe", ".msi", ".dmg", ".pkg", ".deb", ".rpm", ".AppImage":
-		return "💿 [Installer]"
+		return "[EXE]"
 	case ".iso", ".img":
-		return "💽 [Disk Image]"
+		return "[ISO]"
 	default:
-		return "📄 [File]"
+		return "[FILE]"
 	}
 }

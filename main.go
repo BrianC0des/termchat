@@ -43,7 +43,7 @@ func main() {
 			fmt.Println(progressMsg)
 		})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Update failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "[ERR] Update failed: %v\n", err)
 			os.Exit(1)
 		}
 		fmt.Println(msg)

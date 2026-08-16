@@ -1,4 +1,4 @@
-# ⚡ TermChat
+# :: TERMCHAT ::
 
 **TermChat** is a cross-platform, peer-to-peer and cloud-connected TUI (Terminal User Interface) companion and secret messenger for **Windows**, **macOS**, **Linux**, and **Android (Termux)**.
 
@@ -6,44 +6,43 @@ Powered by **Go**, **Bubble Tea**, **Lip Gloss**, and **24/7 Global WebSockets**
 
 ---
 
-## ⚡ 1-Line Quick Installation (via Terminal)
+## :: 1-Line Quick Installation (via Terminal) ::
 
 Run the command for your operating system to download and install TermChat instantly:
 
-### 📱 Android (Termux)
+### [Android / Termux]
 ```bash
-curl -sSL https://github.com/BrianC0des/termchat/releases/download/v1.0.0/termchat-android-arm64 -o $PREFIX/bin/termchat && chmod +x $PREFIX/bin/termchat
+curl -sSL https://github.com/BrianC0des/termchat/releases/latest/download/termchat-android-arm64 -o $PREFIX/bin/termchat && chmod +x $PREFIX/bin/termchat
 ```
 
-### 🐧 Linux (x86_64 / PC / Laptop)
+### [Linux x86_64 / PC / Laptop]
 ```bash
-mkdir -p ~/.local/bin && curl -sSL https://github.com/BrianC0des/termchat/releases/download/v1.0.0/termchat-linux-amd64 -o ~/.local/bin/termchat && chmod +x ~/.local/bin/termchat
+mkdir -p ~/.local/bin && curl -sSL https://github.com/BrianC0des/termchat/releases/latest/download/termchat-linux-amd64 -o ~/.local/bin/termchat && chmod +x ~/.local/bin/termchat
 ```
 
-### 🐧 Linux (ARM64 / Raspberry Pi)
+### [Linux ARM64 / Raspberry Pi]
 ```bash
-mkdir -p ~/.local/bin && curl -sSL https://github.com/BrianC0des/termchat/releases/download/v1.0.0/termchat-linux-arm64 -o ~/.local/bin/termchat && chmod +x ~/.local/bin/termchat
+mkdir -p ~/.local/bin && curl -sSL https://github.com/BrianC0des/termchat/releases/latest/download/termchat-linux-arm64 -o ~/.local/bin/termchat && chmod +x ~/.local/bin/termchat
 ```
 
-### 🍎 macOS (Apple Silicon M1/M2/M3/M4)
+### [macOS Apple Silicon M1-M4]
 ```bash
-sudo curl -sSL https://github.com/BrianC0des/termchat/releases/download/v1.0.0/termchat-mac-apple-silicon -o /usr/local/bin/termchat && sudo chmod +x /usr/local/bin/termchat
+sudo curl -sSL https://github.com/BrianC0des/termchat/releases/latest/download/termchat-mac-apple-silicon -o /usr/local/bin/termchat && sudo chmod +x /usr/local/bin/termchat
 ```
 
-### 🍎 macOS (Intel)
+### [macOS Intel]
 ```bash
-sudo curl -sSL https://github.com/BrianC0des/termchat/releases/download/v1.0.0/termchat-mac-intel -o /usr/local/bin/termchat && sudo chmod +x /usr/local/bin/termchat
+sudo curl -sSL https://github.com/BrianC0des/termchat/releases/latest/download/termchat-mac-intel -o /usr/local/bin/termchat && sudo chmod +x /usr/local/bin/termchat
 ```
 
-### 🪟 Windows (PowerShell)
+### [Windows PowerShell]
 ```powershell
-New-Item -ItemType Directory -Force "$HOME\bin"; curl.exe -sSL https://github.com/BrianC0des/termchat/releases/download/v1.0.0/termchat-windows.exe -o "$HOME\bin\termchat.exe"; & "$HOME\bin\termchat.exe"
+New-Item -ItemType Directory -Force "$HOME\bin"; curl.exe -sSL https://github.com/BrianC0des/termchat/releases/latest/download/termchat-windows.exe -o "$HOME\bin\termchat.exe"; & "$HOME\bin\termchat.exe"
 ```
-*(Or simply download and double click `termchat-windows.exe` from Releases)*
 
 ---
 
-## 🚀 How to Launch & Create Rooms
+## :: How to Launch & Create Rooms ::
 
 ### 1. Join a 24/7 Cloud Room (Works Anywhere in the World):
 ```bash
@@ -59,7 +58,7 @@ termchat
 
 ---
 
-## ⌨️ Command Cheatsheet (Inside Chat)
+## :: Command Cheatsheet (Inside Chat) ::
 
 | Command | Shortcut | Description |
 |---|---|---|
@@ -74,7 +73,7 @@ termchat
 | `/copy <#>` | | Copy specific message text to system clipboard |
 | `/pin <#>` | | Pin important message to top header banner |
 | `/clip` or `/c` | | Push your clipboard directly to connected peers |
-| `/theme <name>` | | Switch UI theme (`catppuccin`, `dracula`, `nord`, etc.) |
+| `/theme <name>` | | Switch UI theme (`catppuccin`, `dracula`, `nord`, `matrix`, etc.) |
 | `/sidebar` | `F3` / `Ctrl+B` | Toggle sidebar layout (Normal, Wide, Zen Fullscreen) |
 | `@agy <prompt>` | | Ask Antigravity AI anything directly in the chatroom |
 | `/peers` / `/ip` | | Show room members online and local network IP |
@@ -84,13 +83,13 @@ termchat
 
 ---
 
-## 🔒 Security & Privacy
+## :: Security & Privacy ::
 - **End-to-End Encryption**: When a room has a password (`-pass` or `/auth`), messages and files are encrypted with **AES-256-GCM** before leaving your device.
 - **Zero Server Logging**: The relay server acts purely as a stateless WebSocket router and cannot decrypt any password-protected traffic.
 
 ---
 
-## 🛠️ Building From Source
+## :: Building From Source ::
 
 ```bash
 git clone https://github.com/BrianC0des/termchat.git

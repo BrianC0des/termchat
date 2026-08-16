@@ -182,7 +182,7 @@ func (m *Manager) Start() error {
 	go m.acceptLoop()
 	if err := m.discovery.Start(); err != nil {
 		if m.events.OnSystemMsg != nil {
-			m.events.OnSystemMsg(fmt.Sprintf("⚠️ UDP Discovery warning: %v (Direct connect still works)", err))
+			m.events.OnSystemMsg(fmt.Sprintf("[WARN] UDP Discovery warning: %v (Direct connect still works)", err))
 		}
 	}
 	return nil
@@ -375,14 +375,14 @@ func (m *Manager) handlePacket(p *PeerConnection, pkt *Packet) {
 	if pkt.Type == MsgTypeEncrypted {
 		if m.EncryptionKey == nil {
 			if m.events.OnSystemMsg != nil {
-				m.events.OnSystemMsg("🔒 Received encrypted packet but no passphrase is set. Use `/auth <passphrase>`")
+				m.events.OnSystemMsg("[AES-256] Received encrypted packet but no passphrase is set. Use `/auth <passphrase>`")
 			}
 			return
 		}
 		decryptedJSON, err := system.Decrypt(pkt.Content, m.EncryptionKey)
 		if err != nil {
 			if m.events.OnSystemMsg != nil {
-				m.events.OnSystemMsg("❌ Decryption failed: wrong passphrase or corrupted data")
+				m.events.OnSystemMsg("[ERR] Decryption failed: wrong passphrase or corrupted data")
 			}
 			return
 		}
@@ -448,7 +448,7 @@ func (m *Manager) handlePacket(p *PeerConnection, pkt *Packet) {
 	case MsgTypeClipboard:
 		_ = system.WriteClipboard(pkt.Content)
 		if m.events.OnSystemMsg != nil {
-			m.events.OnSystemMsg(fmt.Sprintf("📋 Clipboard synced from %s (%d chars)", pkt.Sender, len(pkt.Content)))
+			m.events.OnSystemMsg(fmt.Sprintf("[CLIP] Clipboard synced from %s (%d chars)", pkt.Sender, len(pkt.Content)))
 		}
 
 	case MsgTypeNotify:
@@ -457,20 +457,20 @@ func (m *Manager) handlePacket(p *PeerConnection, pkt *Packet) {
 	case MsgTypeRing:
 		_ = system.TriggerRing()
 		if m.events.OnSystemMsg != nil {
-			m.events.OnSystemMsg(fmt.Sprintf("🔔 %s triggered your device alert/ring!", pkt.Sender))
+			m.events.OnSystemMsg(fmt.Sprintf("[NOTIFY] %s triggered your device alert/ring!", pkt.Sender))
 		}
 
 	case MsgTypeOpenUrl:
 		_ = system.OpenURL(pkt.URL)
 		if m.events.OnSystemMsg != nil {
-			m.events.OnSystemMsg(fmt.Sprintf("🌐 %s opened URL: %s", pkt.Sender, pkt.URL))
+			m.events.OnSystemMsg(fmt.Sprintf("[NET] %s opened URL: %s", pkt.Sender, pkt.URL))
 		}
 
 	case MsgTypeMedia:
 		result, err := system.MediaControl(pkt.Action)
 		msg := result
 		if err != nil {
-			msg = fmt.Sprintf("❌ Media control: %v", err)
+			msg = fmt.Sprintf("[ERR] Media control: %v", err)
 		}
 		if m.events.OnSystemMsg != nil {
 			m.events.OnSystemMsg(fmt.Sprintf("%s (%s)", msg, pkt.Sender))
@@ -525,7 +525,7 @@ func (m *Manager) handleFileOffer(p *PeerConnection, pkt *Packet) {
 	tmpFile, err := os.Create(tempPath)
 	if err != nil {
 		if m.events.OnSystemMsg != nil {
-			m.events.OnSystemMsg(fmt.Sprintf("❌ Error creating file: %v", err))
+			m.events.OnSystemMsg(fmt.Sprintf("[ERR] Error creating file: %v", err))
 		}
 		return
 	}
@@ -1128,7 +1128,7 @@ func (m *Manager) SendFileWithExpiry(filePath, expiry string) error {
 		zipName := filepath.Base(filePath) + ".zip"
 		tempZip := filepath.Join(os.TempDir(), fmt.Sprintf("termchat_%d_%s", time.Now().UnixNano(), zipName))
 		if m.events.OnSystemMsg != nil {
-			m.events.OnSystemMsg(fmt.Sprintf("🗜️ Auto-compressing folder '%s' into ZIP archive...", filepath.Base(filePath)))
+			m.events.OnSystemMsg(fmt.Sprintf("[ZIP] Auto-compressing folder '%s' into ZIP archive...", filepath.Base(filePath)))
 		}
 		if err := zipDirectory(filePath, tempZip); err != nil {
 			return fmt.Errorf("failed to compress directory: %w", err)
@@ -1164,7 +1164,7 @@ func (m *Manager) SendFileWithExpiry(filePath, expiry string) error {
 				}
 				return
 			}
-			shareMsg := fmt.Sprintf("%s Shared file: %s (%s)\n🔗 %s\n[TTL] Auto-Expires in: %s\n:: Type `/get %s` or click the link to download", badge, fileName, FormatBytes(fileSize), dlURL, expiresIn, dlURL)
+			shareMsg := fmt.Sprintf("%s Shared file: %s (%s)\n:: %s\n[TTL] Auto-Expires in: %s\n:: Type `/get %s` or click the link to download", badge, fileName, FormatBytes(fileSize), dlURL, expiresIn, dlURL)
 			_ = m.SendChat(shareMsg)
 			if m.events.OnMessage != nil {
 				m.events.OnMessage(m.LocalID, m.LocalName, shareMsg, time.Now(), 0, "", "")
@@ -1195,7 +1195,7 @@ func (m *Manager) SendFileWithExpiry(filePath, expiry string) error {
 		file, err := os.Open(filePath)
 		if err != nil {
 			if m.events.OnSystemMsg != nil {
-				m.events.OnSystemMsg(fmt.Sprintf("❌ Error opening file: %v", err))
+				m.events.OnSystemMsg(fmt.Sprintf("[ERR] Error opening file: %v", err))
 			}
 			return
 		}
@@ -1301,7 +1301,7 @@ func (m *Manager) SendFileWithExpiry(filePath, expiry string) error {
 		}
 
 		if m.events.OnSystemMsg != nil {
-			m.events.OnSystemMsg(fmt.Sprintf("📤 Finished sending '%s' (%s)", fileName, FormatBytes(fileSize)))
+			m.events.OnSystemMsg(fmt.Sprintf("[SEND] Finished sending '%s' (%s)", fileName, FormatBytes(fileSize)))
 		}
 	}()
 

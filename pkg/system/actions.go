@@ -116,14 +116,14 @@ func MediaControl(action string) (string, error) {
 		cmd.Stderr = &out
 		err := cmd.Run()
 		if err == nil {
-			return fmt.Sprintf("🎵 Playerctl: %s executed", action), nil
+			return fmt.Sprintf("[AUDIO] Playerctl: %s executed", action), nil
 		}
 		return "", fmt.Errorf("playerctl error: %s", out.String())
 	}
 	if isCommandAvailable("termux-media-player") {
 		cmd := exec.Command("termux-media-player", action)
 		_ = cmd.Run()
-		return fmt.Sprintf("🎵 Termux Media: %s", action), nil
+		return fmt.Sprintf("[AUDIO] Termux Media: %s", action), nil
 	}
 	return "", fmt.Errorf("media control (playerctl) not found on this system")
 }

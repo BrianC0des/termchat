@@ -220,9 +220,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if isSelected {
 					err := m.manager.SendFile(selectedFile)
 					if err != nil {
-						m.addSystemMsg(fmt.Sprintf("❌ Send file error: %v", err))
+						m.addSystemMsg(fmt.Sprintf("[ERR] Send file error: %v", err))
 					} else {
-						m.addSystemMsg(fmt.Sprintf("📤 Uploading '%s' to connected peers...", filepath.Base(selectedFile)))
+						m.addSystemMsg(fmt.Sprintf("[SEND] Uploading '%s' to connected peers...", filepath.Base(selectedFile)))
 					}
 				}
 				return m, nil
@@ -250,13 +250,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if len(m.sharedFiles) > 0 && m.selectedFileIdx >= 0 && m.selectedFileIdx < len(m.sharedFiles) {
 					item := m.sharedFiles[m.selectedFileIdx]
 					m.showFilesModal = false
-					m.addSystemMsg(fmt.Sprintf("📥 Downloading '%s'...", item.FileName))
+					m.addSystemMsg(fmt.Sprintf("[RECV] Downloading '%s'...", item.FileName))
 					go func(url string) {
 						savedPath, err := m.manager.DownloadFileFromURL(url)
 						if err != nil {
-							m.addSystemMsg(fmt.Sprintf("❌ Download failed: %v", err))
+							m.addSystemMsg(fmt.Sprintf("[ERR] Download failed: %v", err))
 						} else {
-							m.addSystemMsg(fmt.Sprintf("✅ Download complete! Saved to:\n   📁 %s", savedPath))
+							m.addSystemMsg(fmt.Sprintf("[OK] Download complete! Saved to:\n   [DIR] %s", savedPath))
 						}
 					}(item.URL)
 				}
@@ -265,7 +265,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if msg.String() == "o" || msg.String() == "O" {
 					if len(m.sharedFiles) > 0 && m.selectedFileIdx >= 0 && m.selectedFileIdx < len(m.sharedFiles) {
 						_ = system.OpenURL(m.sharedFiles[m.selectedFileIdx].URL)
-						m.addSystemMsg("🌐 Opened in browser: " + m.sharedFiles[m.selectedFileIdx].URL)
+						m.addSystemMsg("[NET] Opened in browser: " + m.sharedFiles[m.selectedFileIdx].URL)
 					}
 					return m, nil
 				}
@@ -436,7 +436,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case topicUpdateMsg:
 		m.roomTopic = msg.topicText
-		m.addSystemMsg(fmt.Sprintf("📌 %s set Room Topic to: \"%s\"", msg.senderName, msg.topicText))
+		m.addSystemMsg(fmt.Sprintf("[TOPIC] %s set Room Topic to: \"%s\"", msg.senderName, msg.topicText))
 		m.viewport.SetContent(m.renderMessages())
 		return m, nil
 
@@ -446,7 +446,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Content:    msg.pinText,
 			Timestamp:  time.Now(),
 		})
-		m.addSystemMsg(fmt.Sprintf("📌 %s pinned: \"%s\"", msg.senderName, msg.pinText))
+		m.addSystemMsg(fmt.Sprintf("[PIN] %s pinned: \"%s\"", msg.senderName, msg.pinText))
 		return m, nil
 
 	case peerUpdateMsg:
@@ -457,7 +457,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.messages = append(m.messages, ChatMessage{
 				SenderName: "SYSTEM",
-				Content:    fmt.Sprintf("👋 %s has %s", msg.name, action),
+				Content:    fmt.Sprintf("[NET] %s has %s", msg.name, action),
 				Timestamp:  time.Now(),
 				IsSystem:   true,
 			})
@@ -476,11 +476,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.GotoBottom()
 
 	case execOutputMsg:
-		status := "✅ Output"
+		status := "[OK] Output"
 		if msg.isError {
-			status = "❌ Failed"
+			status = "[ERR] Failed"
 		}
-		m.addSystemMsg(fmt.Sprintf("💻 %s from %s for `%s`:\n```\n%s\n```", status, msg.senderName, msg.cmd, msg.output))
+		m.addSystemMsg(fmt.Sprintf("[EXEC] %s from %s for `%s`:\n```\n%s\n```", status, msg.senderName, msg.cmd, msg.output))
 
 	case fileProgressMsg:
 		p := msg.progress
@@ -687,7 +687,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 
 	case "/copy", "/cp":
 		if len(m.messages) == 0 {
-			m.addSystemMsg("📋 No messages to copy")
+			m.addSystemMsg("[CLIP] No messages to copy")
 			return
 		}
 		targetText := ""
@@ -717,9 +717,9 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 				}
 				if targetText == "" {
 					if userMsgCount == 0 {
-						m.addSystemMsg("📋 No chat messages in this room yet. Send a message first to copy it!")
+						m.addSystemMsg("[CLIP] No chat messages in this room yet. Send a message first to copy it!")
 					} else {
-						m.addSystemMsg(fmt.Sprintf("❌ Message #%d not found. This room has %d chat message(s).", num, userMsgCount))
+						m.addSystemMsg(fmt.Sprintf("[ERR] Message #%d not found. This room has %d chat message(s).", num, userMsgCount))
 					}
 					return
 				}
@@ -755,9 +755,9 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			if len(preview) > 50 {
 				preview = preview[:47] + "..."
 			}
-			m.addSystemMsg(fmt.Sprintf("📋 Copied %s to clipboard:\n   \"%s\"", copiedLabel, preview))
+			m.addSystemMsg(fmt.Sprintf("[CLIP] Copied %s to clipboard:\n   \"%s\"", copiedLabel, preview))
 		} else {
-			m.addSystemMsg("📋 No messages found to copy.")
+			m.addSystemMsg("[CLIP] No messages found to copy.")
 		}
 
 	case "/reply", "/r":
@@ -767,7 +767,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		}
 		num, err := strconv.Atoi(parts[1])
 		if err != nil {
-			m.addSystemMsg("❌ Invalid message number. Usage: /reply <#msg> <your message>")
+			m.addSystemMsg("[ERR] Invalid message number. Usage: /reply <#msg> <your message>")
 			return
 		}
 		userMsgCount := 0
@@ -782,7 +782,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			}
 		}
 		if targetMsg == nil {
-			m.addSystemMsg(fmt.Sprintf("❌ Message #%d not found. This room has %d chat message(s).", num, userMsgCount))
+			m.addSystemMsg(fmt.Sprintf("[ERR] Message #%d not found. This room has %d chat message(s).", num, userMsgCount))
 			return
 		}
 		replyContent := strings.Join(parts[2:], " ")
@@ -807,15 +807,15 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 	case "/theme", "/themes":
 		if len(parts) < 2 {
 			var sb strings.Builder
-			sb.WriteString("🎨 Available Themes:\n")
+			sb.WriteString("[THEME] Available Themes:\n")
 			for k, v := range Themes {
 				marker := "  "
 				if k == CurrentTheme {
-					marker = "👉"
+					marker = "> "
 				}
 				sb.WriteString(fmt.Sprintf("%s • /theme %-12s - %s\n", marker, k, v.Name))
 			}
-			sb.WriteString("💡 Type `/theme <name>` to switch instantly!")
+			sb.WriteString(":: Type `/theme <name>` to switch instantly!")
 			m.addSystemMsg(sb.String())
 			return
 		}
@@ -824,18 +824,18 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			cfg := system.LoadConfig()
 			cfg.Theme = targetTheme
 			system.SaveConfig(cfg)
-			m.addSystemMsg(fmt.Sprintf("🎨 Theme switched to '%s' (saved as default)!", Themes[targetTheme].Name))
+			m.addSystemMsg(fmt.Sprintf("[THEME] Theme switched to '%s' (saved as default)!", Themes[targetTheme].Name))
 			m.viewport.SetContent(m.renderMessages())
 		} else {
-			m.addSystemMsg(fmt.Sprintf("❌ Unknown theme '%s'. Type `/themes` to see available palettes.", targetTheme))
+			m.addSystemMsg(fmt.Sprintf("[ERR] Unknown theme '%s'. Type `/themes` to see available palettes.", targetTheme))
 		}
 
 	case "/status":
 		if len(parts) < 2 {
 			if m.myStatus != "" {
-				m.addSystemMsg(fmt.Sprintf("🏷️ Current status: %s (Type `/status clear` to remove)", m.myStatus))
+				m.addSystemMsg(fmt.Sprintf("[STATUS] Current status: %s (Type `/status clear` to remove)", m.myStatus))
 			} else {
-				m.addSystemMsg("Usage: /status <custom status> (e.g., /status 💻 Coding in Go)")
+				m.addSystemMsg("Usage: /status <custom status> (e.g., /status Coding in Go)")
 			}
 			return
 		}
@@ -846,24 +846,24 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		m.myStatus = newStatus
 		_ = m.manager.SendStatus(newStatus)
 		if newStatus != "" {
-			m.addSystemMsg(fmt.Sprintf("🏷️ Status set to: %s", newStatus))
+			m.addSystemMsg(fmt.Sprintf("[STATUS] Status set to: %s", newStatus))
 		} else {
-			m.addSystemMsg("🏷️ Status cleared.")
+			m.addSystemMsg("[STATUS] Status cleared.")
 		}
 
 	case "/afk":
-		afkMsg := "☕ AFK"
+		afkMsg := "[AFK] AFK"
 		if len(parts) > 1 {
-			afkMsg = "☕ AFK: " + strings.Join(parts[1:], " ")
+			afkMsg = "[AFK] AFK: " + strings.Join(parts[1:], " ")
 		}
 		m.myStatus = afkMsg
 		_ = m.manager.SendStatus(afkMsg)
-		m.addSystemMsg(fmt.Sprintf("🏷️ Status set to: %s", afkMsg))
+		m.addSystemMsg(fmt.Sprintf("[STATUS] Status set to: %s", afkMsg))
 
 	case "/topic":
 		if len(parts) < 2 {
 			if m.roomTopic != "" {
-				m.addSystemMsg(fmt.Sprintf("📌 Room Topic: \"%s\"", m.roomTopic))
+				m.addSystemMsg(fmt.Sprintf("[PIN] Room Topic: \"%s\"", m.roomTopic))
 			} else {
 				m.addSystemMsg("Usage: /topic <room description/topic>")
 			}
@@ -876,9 +876,9 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		m.roomTopic = newTopic
 		_ = m.manager.SendTopic(newTopic)
 		if newTopic != "" {
-			m.addSystemMsg(fmt.Sprintf("📌 Room Topic updated to: \"%s\"", newTopic))
+			m.addSystemMsg(fmt.Sprintf("[PIN] Room Topic updated to: \"%s\"", newTopic))
 		} else {
-			m.addSystemMsg("📌 Room Topic cleared.")
+			m.addSystemMsg("[PIN] Room Topic cleared.")
 		}
 		m.viewport.SetContent(m.renderMessages())
 
@@ -889,7 +889,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		}
 		num, err := strconv.Atoi(parts[1])
 		if err != nil {
-			m.addSystemMsg("❌ Invalid message number. Usage: /pin <#msg>")
+			m.addSystemMsg("[ERR] Invalid message number. Usage: /pin <#msg>")
 			return
 		}
 		userMsgCount := 0
@@ -904,20 +904,20 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			}
 		}
 		if targetMsg == nil {
-			m.addSystemMsg(fmt.Sprintf("❌ Message #%d not found.", num))
+			m.addSystemMsg(fmt.Sprintf("[ERR] Message #%d not found.", num))
 			return
 		}
 		m.pinnedMsgs = append(m.pinnedMsgs, *targetMsg)
 		_ = m.manager.SendPin(fmt.Sprintf("[%s]: %s", targetMsg.SenderName, targetMsg.Content))
-		m.addSystemMsg(fmt.Sprintf("📌 Pinned message #%d (%s: \"%s\")", num, targetMsg.SenderName, targetMsg.Content))
+		m.addSystemMsg(fmt.Sprintf("[PIN] Pinned message #%d (%s: \"%s\")", num, targetMsg.SenderName, targetMsg.Content))
 
 	case "/pins":
 		if len(m.pinnedMsgs) == 0 {
-			m.addSystemMsg("📌 No pinned messages in this room yet. (Use `/pin <#>` to pin)")
+			m.addSystemMsg("[PIN] No pinned messages in this room yet. (Use `/pin <#>` to pin)")
 			return
 		}
 		var sb strings.Builder
-		sb.WriteString("📌 Pinned Messages in this Room:\n")
+		sb.WriteString("[PIN] Pinned Messages in this Room:\n")
 		for i, pin := range m.pinnedMsgs {
 			sb.WriteString(fmt.Sprintf("   [%d] [%s] %s: %s\n", i+1, pin.Timestamp.Format("15:04"), pin.SenderName, pin.Content))
 		}
@@ -925,17 +925,17 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 
 	case "/unpin":
 		if len(m.pinnedMsgs) == 0 {
-			m.addSystemMsg("📌 No pinned messages to remove.")
+			m.addSystemMsg("[PIN] No pinned messages to remove.")
 			return
 		}
 		if len(parts) < 2 {
 			m.pinnedMsgs = []ChatMessage{}
-			m.addSystemMsg("📌 Cleared all pinned messages.")
+			m.addSystemMsg("[PIN] Cleared all pinned messages.")
 			return
 		}
 		idx, err := strconv.Atoi(parts[1])
 		if err != nil || idx < 1 || idx > len(m.pinnedMsgs) {
-			m.addSystemMsg(fmt.Sprintf("❌ Invalid pin index. Range: 1-%d", len(m.pinnedMsgs)))
+			m.addSystemMsg(fmt.Sprintf("[ERR] Invalid pin index. Range: 1-%d", len(m.pinnedMsgs)))
 			return
 		}
 		m.pinnedMsgs = append(m.pinnedMsgs[:idx-1], m.pinnedMsgs[idx:]...)
@@ -967,7 +967,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 	case "/paste", "/p":
 		clipText, err := system.ReadClipboard()
 		if err != nil || clipText == "" {
-			m.addSystemMsg("📋 Clipboard is empty")
+			m.addSystemMsg("[CLIP] Clipboard is empty")
 			return
 		}
 		m.textInput.SetValue(m.textInput.Value() + clipText)
@@ -1619,18 +1619,21 @@ func (m *Model) refreshSharedFiles() {
 	var list []SharedFileItem
 	idx := 1
 	for _, msg := range m.messages {
-		if strings.Contains(msg.Content, "Shared file:") && strings.Contains(msg.Content, "🔗 ") {
+		if strings.Contains(msg.Content, "Shared file:") {
 			lines := strings.Split(msg.Content, "\n")
 			fileName := "Shared File"
 			fileURL := ""
 			for _, l := range lines {
+				trimmed := strings.TrimSpace(l)
 				if strings.Contains(l, "Shared file:") {
 					parts := strings.Split(l, "Shared file:")
 					if len(parts) >= 2 {
 						fileName = strings.TrimSpace(parts[1])
 					}
-				} else if strings.HasPrefix(strings.TrimSpace(l), "🔗 ") {
-					fileURL = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l), "🔗 "))
+				} else if strings.HasPrefix(trimmed, "🔗 ") {
+					fileURL = strings.TrimSpace(strings.TrimPrefix(trimmed, "🔗 "))
+				} else if strings.HasPrefix(trimmed, ":: ") && strings.HasPrefix(strings.TrimPrefix(trimmed, ":: "), "http") {
+					fileURL = strings.TrimSpace(strings.TrimPrefix(trimmed, ":: "))
 				}
 			}
 			if fileURL != "" {

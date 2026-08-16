@@ -6,12 +6,12 @@ LOCAL_IP=$(ip -4 addr show scope global | grep inet | awk '{print $2}' | cut -d/
 PORT=8000
 
 echo "=========================================================="
-echo "⚡ TermChat Phone Quick-Install Server"
+echo "[NET] TermChat Phone Quick-Install Server"
 echo "=========================================================="
 echo ""
-echo "📱 Run this single command inside your Termux terminal:"
+echo "[TERMUX] Run this single command inside your Termux terminal:"
 echo ""
-echo "   curl -sSL http://${LOCAL_IP}:${PORT}/dist/termchat-arm64 -o \$PREFIX/bin/termchat && chmod +x \$PREFIX/bin/termchat"
+echo "   curl -sSL http://${LOCAL_IP}:${PORT}/dist/termchat-android-arm64 -o \$PREFIX/bin/termchat && chmod +x \$PREFIX/bin/termchat"
 echo ""
 echo "Then simply type:"
 echo "   termchat"

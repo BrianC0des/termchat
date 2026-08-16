@@ -155,12 +155,12 @@ func NewServer() *Server {
 			s.r2Bucket = r2Bucket
 			s.r2PublicURL = r2PublicURL
 			s.useR2 = true
-			log.Printf("☁️ Cloudflare R2 Object Storage active (Bucket: %s)", r2Bucket)
+			log.Printf("[CLOUD] Cloudflare R2 Object Storage active (Bucket: %s)", r2Bucket)
 		} else {
-			log.Printf("⚠️ Failed to initialize R2 S3 client: %v", err)
+			log.Printf("[WARN] Failed to initialize R2 S3 client: %v", err)
 		}
 	} else {
-		log.Printf("💾 Using local filesystem storage (%s)", uploadDir)
+		log.Printf("[STORAGE] Using local filesystem storage (%s)", uploadDir)
 	}
 
 	// Auto-cleanup expired files every 5 minutes
@@ -447,7 +447,7 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		if jErr := json.Unmarshal(metaBytes, &meta); jErr == nil {
 			if time.Now().After(meta.ExpiresAt) {
 				_ = os.RemoveAll(dirPath)
-				http.Error(w, "❌ This shared file has expired and was deleted.", http.StatusGone)
+				http.Error(w, "[ERR] This shared file has expired and was deleted.", http.StatusGone)
 				return
 			}
 		}
@@ -519,7 +519,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	room.Clients[client.ID] = client
 	room.mu.Unlock()
 
-	log.Printf("🟢 [%s] %s (%s) connected. Total in room: %d", roomName, clientName, clientID, len(room.Clients))
+	log.Printf("[JOIN] [%s] %s (%s) connected. Total in room: %d", roomName, clientName, clientID, len(room.Clients))
 
 	// Send current peers list to new client
 	peersJSON, _ := json.Marshal(currentPeers)
@@ -564,7 +564,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		s.removeClient(client)
 		close(client.SendChan)
 		_ = conn.Close()
-		log.Printf("🔴 [%s] %s disconnected", roomName, clientName)
+		log.Printf("[LEFT] [%s] %s disconnected", roomName, clientName)
 	}()
 
 	conn.SetReadLimit(10 * 1024 * 1024)
@@ -606,8 +606,8 @@ h1 { color: #7aa2f7; }
 </head>
 <body>
 <div class="card">
-  <h1>⚡ TermChat Relay Server</h1>
-  <p>Status: <span class="badge">● ONLINE (24/7)</span></p>
+  <h1>:: TermChat Relay Server ::</h1>
+  <p>Status: <span class="badge">[ONLINE 24/7]</span></p>
   <p>Active Rooms: <b>%d</b></p>
   <p>WebSocket: <code>/ws?room=&lt;room_name&gt;&name=&lt;nickname&gt;&id=&lt;id&gt;</code></p>
   <p>File Storage: <code>/api/upload</code> & <code>/files/&lt;id&gt;/&lt;name&gt;</code></p>
@@ -616,7 +616,7 @@ h1 { color: #7aa2f7; }
 </html>`, totalRooms)
 	})
 
-	log.Printf("⚡ TermChat Relay listening on :%s", port)
+	log.Printf("[NET] TermChat Relay listening on :%s", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatalf("Server error: %v", err)
 	}

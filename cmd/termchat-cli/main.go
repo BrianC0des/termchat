@@ -114,7 +114,7 @@ func main() {
 
 	conn, reader, writer, err := connectToPeer(peerAddr)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Connection Error: %v\n(Make sure TermChat is running in Termux on your phone!)\n", err)
+		fmt.Fprintf(os.Stderr, "[ERR] Connection Error: %v\n(Make sure TermChat is running in Termux on your phone!)\n", err)
 		os.Exit(1)
 	}
 	defer conn.Close()
@@ -248,7 +248,7 @@ func getRemoteBattery(conn net.Conn, reader *bufio.Reader, writer *bufio.Writer,
 		if pkt.Type == network.MsgTypeBatteryResp {
 			var info system.BatteryInfo
 			if err := json.Unmarshal([]byte(pkt.ExtraData), &info); err == nil {
-				fmt.Printf("🔋 Battery: %d%%\n⚡ Status: %s\n🔌 Plugged: %s\n", info.Percentage, info.Status, info.Plugged)
+				fmt.Printf("[BATT] Battery: %d%%\n[NET] Status: %s\n[PWR] Plugged: %s\n", info.Percentage, info.Status, info.Plugged)
 			} else {
 				fmt.Println(pkt.ExtraData)
 			}
@@ -332,7 +332,7 @@ func sendRemoteFile(writer *bufio.Writer, filePath string) {
 	_, _ = writer.Write(dData)
 	_ = writer.Flush()
 
-	fmt.Printf("✅ Sent '%s' (%s) to phone!\n", fileName, network.FormatBytes(fileSize))
+	fmt.Printf("[OK] Sent '%s' (%s) to phone!\n", fileName, network.FormatBytes(fileSize))
 }
 
 func sendNotification(writer *bufio.Writer, msg string) {
@@ -346,7 +346,7 @@ func sendNotification(writer *bufio.Writer, msg string) {
 	data, _ := network.EncodePacket(p)
 	_, _ = writer.Write(data)
 	_ = writer.Flush()
-	fmt.Println("🔔 Notification pushed to phone screen!")
+	fmt.Println("[NOTIFY] Notification pushed to phone screen!")
 }
 
 func sendRing(writer *bufio.Writer) {
@@ -359,7 +359,7 @@ func sendRing(writer *bufio.Writer) {
 	data, _ := network.EncodePacket(p)
 	_, _ = writer.Write(data)
 	_ = writer.Flush()
-	fmt.Println("🔔 Alert triggered on phone!")
+	fmt.Println("[NOTIFY] Alert triggered on phone!")
 }
 
 func openURL(writer *bufio.Writer, url string) {
@@ -376,7 +376,7 @@ func openURL(writer *bufio.Writer, url string) {
 	data, _ := network.EncodePacket(p)
 	_, _ = writer.Write(data)
 	_ = writer.Flush()
-	fmt.Printf("🌐 URL '%s' opened on phone!\n", url)
+	fmt.Printf("[NET] URL '%s' opened on phone!\n", url)
 }
 
 func sendClip(writer *bufio.Writer, text string) {
@@ -390,11 +390,11 @@ func sendClip(writer *bufio.Writer, text string) {
 	data, _ := network.EncodePacket(p)
 	_, _ = writer.Write(data)
 	_ = writer.Flush()
-	fmt.Printf("📋 Synced %d characters to phone clipboard!\n", len(text))
+	fmt.Printf("[CLIP] Synced %d characters to phone clipboard!\n", len(text))
 }
 
 func printUsage() {
-	fmt.Println(`⚡ termchat-cli — Antigravity & Scriptable Phone Bridge
+	fmt.Println(`:: termchat-cli — Antigravity & Scriptable Phone Bridge ::
 
 Usage:
   termchat-cli exec "<command>"   Run shell command in phone's Termux
