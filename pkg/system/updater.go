@@ -19,7 +19,7 @@ import (
 	"time"
 )
 
-const AppVersion = "v1.5.1"
+const AppVersion = "v1.5.2"
 
 type progressWriter struct {
 	total      int64
@@ -123,22 +123,38 @@ func getPlatformBinaryName() string {
 }
 
 func FetchLatestVersionTag() (string, error) {
-	client := &http.Client{Timeout: 5 * time.Second}
-	req, err := http.NewRequest("GET", "https://api.github.com/repos/BrianC0des/termchat/releases/latest", nil)
-	if err != nil {
-		return "", err
+	clients := []*http.Client{
+		createOptimizedHTTPClient(false),
+		createOptimizedHTTPClient(true),
 	}
-	req.Header.Set("User-Agent", "TermChat-Updater/1.3")
+	var resp *http.Response
+	var lastErr error
 
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
+	for _, client := range clients {
+		client.Timeout = 8 * time.Second
+		req, rErr := http.NewRequest("GET", "https://api.github.com/repos/BrianC0des/termchat/releases/latest", nil)
+		if rErr != nil {
+			continue
+		}
+		req.Header.Set("User-Agent", "TermChat-Updater/1.5")
+		r, dErr := client.Do(req)
+		if dErr == nil && r.StatusCode == http.StatusOK {
+			resp = r
+			break
+		}
+		if r != nil {
+			r.Body.Close()
+		}
+		lastErr = dErr
+	}
+
+	if resp == nil {
+		if lastErr != nil {
+			return "", lastErr
+		}
+		return "", fmt.Errorf("could not fetch release tag from GitHub")
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
 
 	var data struct {
 		TagName string `json:"tag_name"`
