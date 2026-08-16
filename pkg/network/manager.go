@@ -1,6 +1,7 @@
 package network
 
 import (
+	"archive/zip"
 	"bufio"
 	"bytes"
 	"context"
@@ -1037,23 +1038,107 @@ func (m *Manager) DownloadFileFromURL(fileURL string) (string, error) {
 	return targetPath, nil
 }
 
+func zipDirectory(sourceDir, targetZip string) error {
+	zipFile, err := os.Create(targetZip)
+	if err != nil {
+		return err
+	}
+	defer zipFile.Close()
+
+	archive := zip.NewWriter(zipFile)
+	defer archive.Close()
+
+	sourceDir = filepath.Clean(sourceDir)
+
+	return filepath.Walk(sourceDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relPath, err := filepath.Rel(sourceDir, path)
+		if err != nil {
+			return err
+		}
+		if relPath == "." {
+			return nil
+		}
+
+		header, err := zip.FileInfoHeader(info)
+		if err != nil {
+			return err
+		}
+
+		header.Name = filepath.ToSlash(relPath)
+		if info.IsDir() {
+			header.Name += "/"
+		} else {
+			header.Method = zip.Deflate
+		}
+
+		writer, err := archive.CreateHeader(header)
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() {
+			return nil
+		}
+
+		file, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+
+		_, err = io.Copy(writer, file)
+		return err
+	})
+}
+
 func (m *Manager) SendFile(filePath string) error {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		return fmt.Errorf("cannot access file: %w", err)
 	}
-	if fileInfo.IsDir() {
-		return fmt.Errorf("directories cannot be sent directly; please compress first")
-	}
 
 	fileName := filepath.Base(filePath)
 	fileSize := fileInfo.Size()
 
+	var isTempZip bool
+	var toCleanZip string
+
+	if fileInfo.IsDir() {
+		zipName := filepath.Base(filePath) + ".zip"
+		tempZip := filepath.Join(os.TempDir(), fmt.Sprintf("termchat_%d_%s", time.Now().UnixNano(), zipName))
+		if m.events.OnSystemMsg != nil {
+			m.events.OnSystemMsg(fmt.Sprintf("🗜️ Auto-compressing folder '%s' into ZIP archive...", filepath.Base(filePath)))
+		}
+		if err := zipDirectory(filePath, tempZip); err != nil {
+			return fmt.Errorf("failed to compress directory: %w", err)
+		}
+		filePath = tempZip
+		fileName = zipName
+		if zInfo, err := os.Stat(tempZip); err == nil {
+			fileSize = zInfo.Size()
+		}
+		isTempZip = true
+		toCleanZip = tempZip
+	}
+
+	badge := GetFileIcon(fileName)
+
 	// 1. If in Cloud Room mode: upload to cloud and share interactive download card
 	if m.RoomName != "" {
 		go func() {
+			if isTempZip {
+				defer func() {
+					if toCleanZip != "" {
+						_ = os.Remove(toCleanZip)
+					}
+				}()
+			}
 			if m.events.OnSystemMsg != nil {
-				m.events.OnSystemMsg(fmt.Sprintf("☁️ Uploading '%s' (%s)...", fileName, FormatBytes(fileSize)))
+				m.events.OnSystemMsg(fmt.Sprintf("☁️ Uploading %s '%s' (%s)...", badge, fileName, FormatBytes(fileSize)))
 			}
 			dlURL, _, _, err := m.UploadFileToRelay(filePath)
 			if err != nil {
@@ -1062,7 +1147,7 @@ func (m *Manager) SendFile(filePath string) error {
 				}
 				return
 			}
-			shareMsg := fmt.Sprintf("📦 Shared file: %s (%s)\n🔗 %s\n💡 Type `/get %s` or click the link to download", fileName, FormatBytes(fileSize), dlURL, dlURL)
+			shareMsg := fmt.Sprintf("%s Shared file: %s (%s)\n🔗 %s\n💡 Type `/get %s` or click the link to download", badge, fileName, FormatBytes(fileSize), dlURL, dlURL)
 			_ = m.SendChat(shareMsg)
 			if m.events.OnSystemMsg != nil {
 				m.events.OnSystemMsg(fmt.Sprintf("✅ Uploaded and shared '%s' to room #%s!", fileName, m.RoomName))

@@ -81,3 +81,41 @@ func DecodePacket(data []byte) (*Packet, error) {
 	}
 	return &p, nil
 }
+
+func GetFileIcon(fileName string) string {
+	ext := ""
+	for i := len(fileName) - 1; i >= 0; i-- {
+		if fileName[i] == '.' {
+			ext = fileName[i:]
+			break
+		}
+	}
+	switch ext {
+	case ".zip", ".tar", ".gz", ".tgz", ".rar", ".7z", ".bz2", ".xz":
+		return "📦 [Archive]"
+	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".bmp":
+		return "🖼️ [Image]"
+	case ".mp4", ".mkv", ".avi", ".mov", ".webm", ".flv":
+		return "🎬 [Video]"
+	case ".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac":
+		return "🎵 [Audio]"
+	case ".pdf":
+		return "📕 [PDF]"
+	case ".doc", ".docx", ".odt", ".rtf":
+		return "📘 [Word]"
+	case ".xls", ".xlsx", ".csv", ".ods":
+		return "📊 [Sheet]"
+	case ".ppt", ".pptx", ".odp":
+		return "📙 [Slides]"
+	case ".go", ".rs", ".py", ".js", ".ts", ".jsx", ".tsx", ".html", ".css", ".c", ".cpp", ".h", ".json", ".yaml", ".yml", ".sh", ".bash", ".sql":
+		return "💻 [Code]"
+	case ".apk", ".aab":
+		return "📱 [Android App]"
+	case ".exe", ".msi", ".dmg", ".pkg", ".deb", ".rpm", ".AppImage":
+		return "💿 [Installer]"
+	case ".iso", ".img":
+		return "💽 [Disk Image]"
+	default:
+		return "📄 [File]"
+	}
+}
