@@ -1313,21 +1313,44 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 
 	case "/send", "/file":
 		if len(parts) < 2 {
-			m.addSystemMsg("Usage: /send <file_path>  (or press Ctrl+O / type /browse for file explorer)")
+			m.addSystemMsg("Usage: /send <file_path> [optional_expiry: 10m, 1h, 1d, 7d]\nExamples:\n  /send notes.pdf\n  /send secret.zip 1h\n  /send database.sql 7d")
 			return
 		}
+		
 		filePath := strings.Join(parts[1:], " ")
+		expiry := "24h"
+
+		if len(parts) >= 3 {
+			lastToken := strings.ToLower(parts[len(parts)-1])
+			if strings.HasSuffix(lastToken, "m") || strings.HasSuffix(lastToken, "h") || strings.HasSuffix(lastToken, "d") || strings.HasSuffix(lastToken, "w") {
+				var n int
+				if _, err := fmt.Sscanf(lastToken[:len(lastToken)-1], "%d", &n); err == nil && n > 0 {
+					candidate := strings.Join(parts[1:len(parts)-1], " ")
+					checkPath := candidate
+					if strings.HasPrefix(checkPath, "~") {
+						if home, err := os.UserHomeDir(); err == nil {
+							checkPath = filepath.Join(home, strings.TrimPrefix(checkPath, "~"))
+						}
+					}
+					if _, err := os.Stat(checkPath); err == nil {
+						filePath = candidate
+						expiry = lastToken
+					}
+				}
+			}
+		}
+
 		if strings.HasPrefix(filePath, "~") {
 			if home, err := os.UserHomeDir(); err == nil {
 				filePath = filepath.Join(home, strings.TrimPrefix(filePath, "~"))
 			}
 		}
 
-		err := m.manager.SendFile(filePath)
+		err := m.manager.SendFileWithExpiry(filePath, expiry)
 		if err != nil {
 			m.addSystemMsg(fmt.Sprintf("❌ Send file error: %v", err))
 		} else {
-			m.addSystemMsg(fmt.Sprintf("📤 Uploading '%s' to connected peers...", filepath.Base(filePath)))
+			m.addSystemMsg(fmt.Sprintf("📤 Uploading '%s' (Expires: %s)...", filepath.Base(filePath), expiry))
 		}
 
 	case "/dir":

@@ -865,14 +865,14 @@ func (m *Manager) SendBotChat(botName, text string) error {
 	return m.SendPacket(p)
 }
 
-func (m *Manager) UploadFileToRelay(filePath string) (string, string, int64, error) {
+func (m *Manager) UploadFileToRelay(filePath string, expiry string) (string, string, int64, string, error) {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
-		return "", "", 0, err
+		return "", "", 0, "", err
 	}
 	file, err := os.Open(filePath)
 	if err != nil {
-		return "", "", 0, err
+		return "", "", 0, "", err
 	}
 	defer file.Close()
 
@@ -880,13 +880,17 @@ func (m *Manager) UploadFileToRelay(filePath string) (string, string, int64, err
 	writer := multipart.NewWriter(body)
 	part, err := writer.CreateFormFile("file", filepath.Base(filePath))
 	if err != nil {
-		return "", "", 0, err
+		return "", "", 0, "", err
 	}
 
 	_, err = io.Copy(part, file)
 	if err != nil {
-		return "", "", 0, err
+		return "", "", 0, "", err
 	}
+	if expiry == "" {
+		expiry = "24h"
+	}
+	_ = writer.WriteField("expiry", expiry)
 	_ = writer.Close()
 
 	uploadURL := "https://termchat-o51d.onrender.com/api/upload"
@@ -902,33 +906,42 @@ func (m *Manager) UploadFileToRelay(filePath string) (string, string, int64, err
 
 	req, err := http.NewRequest("POST", uploadURL, body)
 	if err != nil {
-		return "", "", 0, err
+		return "", "", 0, "", err
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", "", 0, err
+		return "", "", 0, "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return "", "", 0, fmt.Errorf("upload failed (%d): %s", resp.StatusCode, string(respBody))
+		return "", "", 0, "", fmt.Errorf("upload failed (%d): %s", resp.StatusCode, string(respBody))
 	}
 
 	var res struct {
-		ID       string `json:"id"`
-		FileName string `json:"filename"`
-		Size     int64  `json:"size"`
-		URL      string `json:"url"`
+		ID        string `json:"id"`
+		FileName  string `json:"filename"`
+		Size      int64  `json:"size"`
+		URL       string `json:"url"`
+		ExpiresIn string `json:"expires_in"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return "", "", 0, err
+		return "", "", 0, "", err
+	}
+	if res.ExpiresIn == "" {
+		res.ExpiresIn = expiry
 	}
 
-	return res.URL, res.FileName, fileInfo.Size(), nil
+	return res.URL, res.FileName, fileInfo.Size(), res.ExpiresIn, nil
+}
+
+func (m *Manager) UploadFileToRelayLegacy(filePath string) (string, string, int64, error) {
+	u, fn, sz, _, err := m.UploadFileToRelay(filePath, "24h")
+	return u, fn, sz, err
 }
 
 func (m *Manager) DownloadFileFromURL(fileURL string) (string, error) {
@@ -1096,6 +1109,10 @@ func zipDirectory(sourceDir, targetZip string) error {
 }
 
 func (m *Manager) SendFile(filePath string) error {
+	return m.SendFileWithExpiry(filePath, "24h")
+}
+
+func (m *Manager) SendFileWithExpiry(filePath, expiry string) error {
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		return fmt.Errorf("cannot access file: %w", err)
@@ -1138,19 +1155,19 @@ func (m *Manager) SendFile(filePath string) error {
 				}()
 			}
 			if m.events.OnSystemMsg != nil {
-				m.events.OnSystemMsg(fmt.Sprintf("☁️ Uploading %s '%s' (%s)...", badge, fileName, FormatBytes(fileSize)))
+				m.events.OnSystemMsg(fmt.Sprintf("☁️ Uploading %s '%s' (%s) [Expires: %s]...", badge, fileName, FormatBytes(fileSize), expiry))
 			}
-			dlURL, _, _, err := m.UploadFileToRelay(filePath)
+			dlURL, _, _, expiresIn, err := m.UploadFileToRelay(filePath, expiry)
 			if err != nil {
 				if m.events.OnSystemMsg != nil {
 					m.events.OnSystemMsg(fmt.Sprintf("❌ Upload failed: %v", err))
 				}
 				return
 			}
-			shareMsg := fmt.Sprintf("%s Shared file: %s (%s)\n🔗 %s\n💡 Type `/get %s` or click the link to download", badge, fileName, FormatBytes(fileSize), dlURL, dlURL)
+			shareMsg := fmt.Sprintf("%s Shared file: %s (%s)\n🔗 %s\n⏳ Auto-Expires in: %s\n💡 Type `/get %s` or click the link to download", badge, fileName, FormatBytes(fileSize), dlURL, expiresIn, dlURL)
 			_ = m.SendChat(shareMsg)
 			if m.events.OnSystemMsg != nil {
-				m.events.OnSystemMsg(fmt.Sprintf("✅ Uploaded and shared '%s' to room #%s!", fileName, m.RoomName))
+				m.events.OnSystemMsg(fmt.Sprintf("✅ Uploaded and shared '%s' to room #%s (Expires in %s)!", fileName, m.RoomName, expiresIn))
 			}
 		}()
 		return nil

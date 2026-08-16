@@ -73,6 +73,59 @@ func generateID() string {
 	return hex.EncodeToString(bytes)
 }
 
+type FileMeta struct {
+	ID        string    `json:"id"`
+	FileName  string    `json:"filename"`
+	Size      int64     `json:"size"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
+}
+
+func parseExpiry(val string) time.Duration {
+	val = strings.TrimSpace(strings.ToLower(val))
+	if val == "" {
+		return 24 * time.Hour
+	}
+	if strings.HasSuffix(val, "d") {
+		daysStr := strings.TrimSuffix(val, "d")
+		var days int
+		if _, err := fmt.Sscanf(daysStr, "%d", &days); err == nil && days > 0 {
+			return time.Duration(days) * 24 * time.Hour
+		}
+	}
+	if strings.HasSuffix(val, "w") {
+		weeksStr := strings.TrimSuffix(val, "w")
+		var weeks int
+		if _, err := fmt.Sscanf(weeksStr, "%d", &weeks); err == nil && weeks > 0 {
+			return time.Duration(weeks) * 7 * 24 * time.Hour
+		}
+	}
+	d, err := time.ParseDuration(val)
+	if err == nil && d > 0 {
+		return d
+	}
+	return 24 * time.Hour
+}
+
+func formatDuration(d time.Duration) string {
+	if d >= 48*time.Hour {
+		return fmt.Sprintf("%d days", int(d.Hours()/24))
+	}
+	if d >= 24*time.Hour {
+		return "1 day"
+	}
+	if d >= 2*time.Hour {
+		return fmt.Sprintf("%d hours", int(d.Hours()))
+	}
+	if d >= time.Hour {
+		return "1 hour"
+	}
+	if d >= time.Minute {
+		return fmt.Sprintf("%d minutes", int(d.Minutes()))
+	}
+	return fmt.Sprintf("%d seconds", int(d.Seconds()))
+}
+
 func NewServer() *Server {
 	uploadDir := "/tmp/termchat_uploads"
 	_ = os.MkdirAll(uploadDir, 0755)
@@ -110,17 +163,33 @@ func NewServer() *Server {
 		log.Printf("💾 Using local filesystem storage (%s)", uploadDir)
 	}
 
-	// Auto-cleanup local files older than 24h (if not using R2)
+	// Auto-cleanup expired files every 5 minutes
 	go func() {
 		for {
-			time.Sleep(1 * time.Hour)
+			time.Sleep(5 * time.Minute)
 			files, err := os.ReadDir(uploadDir)
 			if err == nil {
 				now := time.Now()
 				for _, f := range files {
+					if !f.IsDir() {
+						continue
+					}
+					folderPath := filepath.Join(uploadDir, f.Name())
+					metaPath := filepath.Join(folderPath, "meta.json")
+					metaBytes, mErr := os.ReadFile(metaPath)
+					if mErr == nil {
+						var meta FileMeta
+						if jErr := json.Unmarshal(metaBytes, &meta); jErr == nil {
+							if now.After(meta.ExpiresAt) {
+								_ = os.RemoveAll(folderPath)
+								continue
+							}
+						}
+					}
+					// Fallback: delete if older than 7 days
 					info, err := f.Info()
-					if err == nil && now.Sub(info.ModTime()) > 24*time.Hour {
-						_ = os.RemoveAll(filepath.Join(uploadDir, f.Name()))
+					if err == nil && now.Sub(info.ModTime()) > 7*24*time.Hour {
+						_ = os.RemoveAll(folderPath)
 					}
 				}
 			}
@@ -215,6 +284,10 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	fileID := generateID()
 	cleanName := filepath.Base(header.Filename)
+	expiryStr := r.FormValue("expiry")
+	expiryDur := parseExpiry(expiryStr)
+	createdAt := time.Now()
+	expiresAt := createdAt.Add(expiryDur)
 
 	proto := "https"
 	if r.TLS == nil && !strings.HasPrefix(r.Header.Get("X-Forwarded-Proto"), "https") {
@@ -244,11 +317,13 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		}
 
 		resp := map[string]interface{}{
-			"id":       fileID,
-			"filename": cleanName,
-			"size":     header.Size,
-			"url":      downloadURL,
-			"storage":  "cloudflare_r2",
+			"id":         fileID,
+			"filename":   cleanName,
+			"size":       header.Size,
+			"url":        downloadURL,
+			"expires_in": formatDuration(expiryDur),
+			"expires_at": expiresAt.Unix(),
+			"storage":    "cloudflare_r2",
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
@@ -273,14 +348,28 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Save expiration metadata
+	meta := FileMeta{
+		ID:        fileID,
+		FileName:  cleanName,
+		Size:      written,
+		CreatedAt: createdAt,
+		ExpiresAt: expiresAt,
+	}
+	if metaBytes, mErr := json.Marshal(meta); mErr == nil {
+		_ = os.WriteFile(filepath.Join(dirPath, "meta.json"), metaBytes, 0644)
+	}
+
 	downloadURL := fmt.Sprintf("%s://%s/files/%s/%s", proto, host, fileID, url.PathEscape(cleanName))
 
 	resp := map[string]interface{}{
-		"id":       fileID,
-		"filename": cleanName,
-		"size":     written,
-		"url":      downloadURL,
-		"storage":  "local_disk",
+		"id":         fileID,
+		"filename":   cleanName,
+		"size":       written,
+		"url":        downloadURL,
+		"expires_in": formatDuration(expiryDur),
+		"expires_at": expiresAt.Unix(),
+		"storage":    "local_disk",
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -350,6 +439,19 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 
 	// 2. Local filesystem storage
 	dirPath := filepath.Join(s.uploadDir, fileID)
+
+	// Check expiration
+	metaPath := filepath.Join(dirPath, "meta.json")
+	if metaBytes, mErr := os.ReadFile(metaPath); mErr == nil {
+		var meta FileMeta
+		if jErr := json.Unmarshal(metaBytes, &meta); jErr == nil {
+			if time.Now().After(meta.ExpiresAt) {
+				_ = os.RemoveAll(dirPath)
+				http.Error(w, "❌ This shared file has expired and was deleted.", http.StatusGone)
+				return
+			}
+		}
+	}
 	var targetFile string
 
 	if fileName != "" {
