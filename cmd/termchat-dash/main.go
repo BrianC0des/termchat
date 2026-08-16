@@ -132,8 +132,9 @@ func initialModel() model {
 		logFilter:   "ALL",
 		lastUpdated: time.Now(),
 		logs: []string{
-			fmt.Sprintf("%s [SYS] Dashboard engine initialized", time.Now().Format("15:04:05")),
+			fmt.Sprintf("%s [SYS] TermChat Dashboard initialized", time.Now().Format("15:04:05")),
 			fmt.Sprintf("%s [NET] Latency probing active (GitHub / Fastly / Google / Relay)", time.Now().Format("15:04:05")),
+			fmt.Sprintf("%s [BUILD] Zstandard (.tar.zst) release engine active", time.Now().Format("15:04:05")),
 		},
 	}
 }
@@ -290,7 +291,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "r":
-			m.logs = append(m.logs, fmt.Sprintf("%s [SYS] Refresh requested", time.Now().Format("15:04:05")))
 			return m, tea.Batch(fetchReleaseDataCmd(), fetchMirrorPingCmd(m.relayURL))
 		case "f":
 			switch m.logFilter {
@@ -303,7 +303,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				m.logFilter = "ALL"
 			}
-			m.logs = append(m.logs, fmt.Sprintf("%s [SYS] Filter set to [%s]", time.Now().Format("15:04:05"), m.logFilter))
+			// Silent filter change (no log spam)
 			return m, nil
 		case "c":
 			m.logs = []string{fmt.Sprintf("%s [SYS] Logs cleared", time.Now().Format("15:04:05"))}
@@ -358,7 +358,6 @@ func (m model) View() string {
 		return "Initializing Dashboard..."
 	}
 
-	// Calculate strict Container Widths
 	containerWidth := m.width - 2
 	if containerWidth < 80 {
 		containerWidth = 80
