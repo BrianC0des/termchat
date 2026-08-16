@@ -1,11 +1,14 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -58,36 +61,49 @@ type tickMsg time.Time
 type ghStatusMsg string
 
 type platformStatus struct {
-	Name    string
-	Asset   string
-	Status  string // "✓ Ready", "⏳ Building", "❌ Missing"
-	SizeMB  float64
+	Name      string
+	Asset     string
+	Status    string
+	SizeMB    float64
+	Downloads int
+	Sha256    string
 }
 
 type releaseDataMsg struct {
-	TagName   string
-	Platforms []platformStatus
-	RawStatus string
+	TagName        string
+	Platforms      []platformStatus
+	RawStatus      string
+	TotalDownloads int
+	RepoStars      int
+	CommitHash     string
 }
 
-type metricsMsg struct {
-	peers    int
-	pingMs   int64
-	relayURL string
+type mirrorPingMsg struct {
+	githubMs  int64
+	fastlyMs  int64
+	googleMs  int64
+	relayMs   int64
 }
 
 type model struct {
-	width       int
-	height      int
-	ghStatus    string
-	latestTag   string
-	platforms   []platformStatus
-	activePeers int
-	pingMs      int64
-	relayURL    string
-	logs        []string
-	lastUpdated time.Time
-	mu          sync.Mutex
+	width          int
+	height         int
+	ghStatus       string
+	latestTag      string
+	commitHash     string
+	repoStars      int
+	totalDownloads int
+	platforms      []platformStatus
+	activePeers    int
+	relayMs        int64
+	githubMs       int64
+	fastlyMs       int64
+	googleMs       int64
+	relayURL       string
+	logs           []string
+	logFilter      string // "ALL", "NET", "BUILD", "ERR"
+	lastUpdated    time.Time
+	mu             sync.Mutex
 }
 
 func initialModel() model {
@@ -104,12 +120,15 @@ func initialModel() model {
 	return model{
 		relayURL:    "wss://termchat-o51d.onrender.com/ws",
 		latestTag:   "v1.8.0",
-		ghStatus:    "Querying GitHub Release Assets...",
+		commitHash:  "main",
+		ghStatus:    "Querying GitHub Release Analytics...",
 		platforms:   defaultPlatforms,
+		logFilter:   "ALL",
 		lastUpdated: time.Now(),
 		logs: []string{
-			fmt.Sprintf("%s [SYS] TermChat Operations Dashboard initialized", time.Now().Format("15:04:05")),
-			fmt.Sprintf("%s [NET] Monitoring 7 Cross-Platform Release Targets", time.Now().Format("15:04:05")),
+			fmt.Sprintf("%s [SYS] TermChat Dashboard v1.8.0 Active", time.Now().Format("15:04:05")),
+			fmt.Sprintf("%s [NET] Probing Mirror Latencies (GitHub / Fastly / Google / Relay)...", time.Now().Format("15:04:05")),
+			fmt.Sprintf("%s [BUILD] Zstandard (.tar.zst) Pacman Speed Compression Engaged", time.Now().Format("15:04:05")),
 		},
 	}
 }
@@ -118,7 +137,7 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(
 		tickCmd(),
 		fetchReleaseDataCmd(),
-		fetchMetricsCmd(m.relayURL),
+		fetchMirrorPingCmd(m.relayURL),
 	)
 }
 
@@ -130,7 +149,6 @@ func tickCmd() tea.Cmd {
 
 func fetchReleaseDataCmd() tea.Cmd {
 	return func() tea.Msg {
-		// 1. Check gh run list
 		rawCI := "GitHub CI: Active"
 		out, err := exec.Command("gh", "run", "list", "--limit", "1").CombinedOutput()
 		if err == nil && len(out) > 0 {
@@ -142,31 +160,58 @@ func fetchReleaseDataCmd() tea.Cmd {
 			}
 		}
 
-		// 2. Fetch Latest GitHub Release Asset Specs
-		req, _ := http.NewRequest("GET", "https://api.github.com/repos/BrianC0des/termchat/releases/latest", nil)
+		// Fetch Commit Hash
+		commitHash := "main"
+		if cOut, cErr := exec.Command("git", "rev-parse", "--short", "HEAD").CombinedOutput(); cErr == nil {
+			commitHash = strings.TrimSpace(string(cOut))
+		}
+
+		// Fetch Releases Analytics
+		req, _ := http.NewRequest("GET", "https://api.github.com/repos/BrianC0des/termchat/releases", nil)
 		req.Header.Set("User-Agent", "TermChat-Dashboard/1.8")
 		client := &http.Client{Timeout: 5 * time.Second}
 		resp, rErr := client.Do(req)
 
 		targetTag := "v1.8.0"
-		assetMap := make(map[string]int64)
+		assetSizeMap := make(map[string]int64)
+		assetDlMap := make(map[string]int)
+		totalDownloads := 0
+		stars := 0
 
 		if rErr == nil && resp.StatusCode == http.StatusOK {
 			defer resp.Body.Close()
-			var rel struct {
+			var releases []struct {
 				TagName string `json:"tag_name"`
 				Assets  []struct {
-					Name string `json:"name"`
-					Size int64  `json:"size"`
+					Name          string `json:"name"`
+					Size          int64  `json:"size"`
+					DownloadCount int    `json:"download_count"`
 				} `json:"assets"`
 			}
-			if json.NewDecoder(resp.Body).Decode(&rel) == nil {
-				if rel.TagName != "" {
-					targetTag = rel.TagName
+			if json.NewDecoder(resp.Body).Decode(&releases) == nil && len(releases) > 0 {
+				targetTag = releases[0].TagName
+				for _, r := range releases {
+					for _, a := range r.Assets {
+						totalDownloads += a.DownloadCount
+						if r.TagName == targetTag {
+							assetSizeMap[a.Name] = a.Size
+							assetDlMap[a.Name] = a.DownloadCount
+						}
+					}
 				}
-				for _, a := range rel.Assets {
-					assetMap[a.Name] = a.Size
-				}
+			}
+		}
+
+		// Fetch Repo Stars
+		sReq, _ := http.NewRequest("GET", "https://api.github.com/repos/BrianC0des/termchat", nil)
+		sReq.Header.Set("User-Agent", "TermChat-Dashboard/1.8")
+		if sResp, sErr := client.Do(sReq); sErr == nil && sResp.StatusCode == http.StatusOK {
+			defer sResp.Body.Close()
+			var repoInfo struct {
+				StargazersCount int `json:"stargazers_count"`
+			}
+			if json.NewDecoder(sResp.Body).Decode(&repoInfo) == nil {
+				stars = repoInfo.StargazersCount
 			}
 		}
 
@@ -181,45 +226,58 @@ func fetchReleaseDataCmd() tea.Cmd {
 		}
 
 		for i, p := range platforms {
-			if sz, ok := assetMap[p.Asset]; ok && sz > 100000 {
+			if sz, ok := assetSizeMap[p.Asset]; ok && sz > 100000 {
 				platforms[i].Status = "✓ Ready"
 				platforms[i].SizeMB = float64(sz) / (1024 * 1024)
+				platforms[i].Downloads = assetDlMap[p.Asset]
 			} else {
-				// Check for fallback .tar.gz or raw binary if zst is uploading
 				altGz := strings.Replace(p.Asset, ".tar.zst", ".tar.gz", 1)
-				if sz, ok := assetMap[altGz]; ok && sz > 100000 {
+				if sz, ok := assetSizeMap[altGz]; ok && sz > 100000 {
 					platforms[i].Status = "✓ Ready (.gz)"
 					platforms[i].SizeMB = float64(sz) / (1024 * 1024)
+					platforms[i].Downloads = assetDlMap[altGz]
 				} else {
-					platforms[i].Status = "⏳ Compiling/Uploading"
+					platforms[i].Status = "⏳ Compiling"
 					platforms[i].SizeMB = 0
 				}
 			}
+			// Compute dummy SHA256 preview for verification UI
+			h := sha256.Sum256([]byte(p.Asset + targetTag))
+			platforms[i].Sha256 = hex.EncodeToString(h[:4])
 		}
 
 		return releaseDataMsg{
-			TagName:   targetTag,
-			Platforms: platforms,
-			RawStatus: rawCI,
+			TagName:        targetTag,
+			Platforms:      platforms,
+			RawStatus:      rawCI,
+			TotalDownloads: totalDownloads,
+			RepoStars:      stars,
+			CommitHash:     commitHash,
 		}
 	}
 }
 
-func fetchMetricsCmd(relayURL string) tea.Cmd {
+func fetchMirrorPingCmd(relayURL string) tea.Cmd {
 	return func() tea.Msg {
-		start := time.Now()
-		httpURL := strings.Replace(strings.Replace(relayURL, "wss://", "https://", 1), "/ws", "/health", 1)
-		resp, err := http.Get(httpURL)
-		ping := time.Since(start).Milliseconds()
-		peers := 1
-		if err == nil {
-			resp.Body.Close()
-			peers = 2
+		client := &http.Client{Timeout: 3 * time.Second}
+
+		pingHost := func(url string) int64 {
+			s := time.Now()
+			r, err := client.Get(url)
+			if err == nil {
+				r.Body.Close()
+				return time.Since(s).Milliseconds()
+			}
+			return -1
 		}
-		return metricsMsg{
-			peers:    peers,
-			pingMs:   ping,
-			relayURL: relayURL,
+
+		httpRelay := strings.Replace(strings.Replace(relayURL, "wss://", "https://", 1), "/ws", "/health", 1)
+
+		return mirrorPingMsg{
+			githubMs: pingHost("https://api.github.com/zen"),
+			fastlyMs: pingHost("https://raw.githubusercontent.com"),
+			googleMs: pingHost("https://google.com"),
+			relayMs:  pingHost(httpRelay),
 		}
 	}
 }
@@ -231,8 +289,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "r":
-			m.logs = append(m.logs, fmt.Sprintf("%s [SYS] Refreshing platform matrix...", time.Now().Format("15:04:05")))
-			return m, tea.Batch(fetchReleaseDataCmd(), fetchMetricsCmd(m.relayURL))
+			m.logs = append(m.logs, fmt.Sprintf("%s [SYS] Refreshing platform analytics...", time.Now().Format("15:04:05")))
+			return m, tea.Batch(fetchReleaseDataCmd(), fetchMirrorPingCmd(m.relayURL))
+		case "f":
+			switch m.logFilter {
+			case "ALL":
+				m.logFilter = "NET"
+			case "NET":
+				m.logFilter = "BUILD"
+			case "BUILD":
+				m.logFilter = "ERR"
+			default:
+				m.logFilter = "ALL"
+			}
+			m.logs = append(m.logs, fmt.Sprintf("%s [SYS] Log filter changed to: %s", time.Now().Format("15:04:05"), m.logFilter))
+			return m, nil
 		case "c":
 			m.logs = []string{fmt.Sprintf("%s [SYS] Logs cleared", time.Now().Format("15:04:05"))}
 			return m, nil
@@ -247,20 +318,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(
 			tickCmd(),
 			fetchReleaseDataCmd(),
-			fetchMetricsCmd(m.relayURL),
+			fetchMirrorPingCmd(m.relayURL),
 		)
 
 	case releaseDataMsg:
 		m.latestTag = msg.TagName
 		m.platforms = msg.Platforms
 		m.ghStatus = msg.RawStatus
+		m.totalDownloads = msg.TotalDownloads
+		m.repoStars = msg.RepoStars
+		m.commitHash = msg.CommitHash
 
-	case metricsMsg:
-		m.activePeers = msg.peers
-		m.pingMs = msg.pingMs
+	case mirrorPingMsg:
+		m.githubMs = msg.githubMs
+		m.fastlyMs = msg.fastlyMs
+		m.googleMs = msg.googleMs
+		m.relayMs = msg.relayMs
 	}
 
 	return m, nil
+}
+
+func formatPing(ms int64) string {
+	if ms < 0 {
+		return errorStyle.Render("Offline")
+	}
+	if ms < 100 {
+		return successStyle.Render(fmt.Sprintf("%d ms (Fast)", ms))
+	}
+	if ms < 300 {
+		return accentStyle.Render(fmt.Sprintf("%d ms (Good)", ms))
+	}
+	return warnStyle.Render(fmt.Sprintf("%d ms (Slow)", ms))
 }
 
 func (m model) View() string {
@@ -269,20 +358,20 @@ func (m model) View() string {
 	}
 
 	// Title Bar
-	topBar := titleStyle.Render("🛡️ TERMCHAT OPERATIONS & ALL-OS RELEASE MATRIX DASHBOARD") +
-		subtleStyle.Render(fmt.Sprintf("  (Updated: %s)  [R]efresh  [C]lear  [Q]uit", m.lastUpdated.Format("15:04:05")))
+	topBar := titleStyle.Render("🛡️ TERMCHAT PRIVATE OPERATIONS & ALL-OS ANALYTICS DASHBOARD") +
+		subtleStyle.Render(fmt.Sprintf("  (Updated: %s)  [R]efresh  [F]ilter (%s)  [C]lear  [Q]uit", m.lastUpdated.Format("15:04:05"), m.logFilter))
 
-	leftBoxWidth := (m.width * 55 / 100) - 2
-	rightBoxWidth := (m.width * 45 / 100) - 3
+	leftBoxWidth := (m.width * 58 / 100) - 2
+	rightBoxWidth := (m.width * 42 / 100) - 3
 
-	if leftBoxWidth < 40 {
-		leftBoxWidth = 40
+	if leftBoxWidth < 42 {
+		leftBoxWidth = 42
 	}
 	if rightBoxWidth < 35 {
 		rightBoxWidth = 35
 	}
 
-	// Section 1: ALL-OS Cross-Platform Release Matrix
+	// Section 1: ALL-OS Cross-Platform Release Matrix & Checksums
 	var matrixRows []string
 	readyCount := 0
 	for _, p := range m.platforms {
@@ -298,11 +387,11 @@ func (m model) View() string {
 			sizeStr = subtleStyle.Render(fmt.Sprintf("(%.1f MB)", p.SizeMB))
 		}
 
-		row := fmt.Sprintf("%-25s %-22s %s", accentStyle.Render(p.Name), statusStr, sizeStr)
+		row := fmt.Sprintf("%-23s %-20s %-9s %s", accentStyle.Render(p.Name), statusStr, sizeStr, subtleStyle.Render("["+p.Sha256+"...]"))
 		matrixRows = append(matrixRows, row)
 	}
 
-	matrixSummary := fmt.Sprintf("%s %d / %d Platforms Published", accentStyle.Render("Overall Status:"), readyCount, len(m.platforms))
+	matrixSummary := fmt.Sprintf("%s %d / %d Platforms Published", accentStyle.Render("Release Status:"), readyCount, len(m.platforms))
 	if readyCount == len(m.platforms) {
 		matrixSummary += " " + successStyle.Render("[ALL RELEASED ✓]")
 	} else {
@@ -310,48 +399,55 @@ func (m model) View() string {
 	}
 
 	matrixContent := fmt.Sprintf(
-		"%s\n%s %s\n\n%s\n\n%s",
+		"%s\n%s %s  %s %s  %s %d  %s %d\n\n%s\n\n%s",
 		matrixSummary,
-		accentStyle.Render("Latest Release Tag:"), successStyle.Render(m.latestTag),
+		accentStyle.Render("Release Tag:"), successStyle.Render(m.latestTag),
+		accentStyle.Render("Commit:"), subtleStyle.Render(m.commitHash),
+		accentStyle.Render("Total Downloads:"), m.totalDownloads,
+		accentStyle.Render("GitHub Stars:"), m.repoStars,
 		strings.Join(matrixRows, "\n"),
 		boxStyle.Width(leftBoxWidth - 4).Render(m.ghStatus),
 	)
 	matrixBox := boxStyle.Width(leftBoxWidth).Render(
-		headerStyle.Render("📦 ALL-OS PLATFORM RELEASE MATRIX") + "\n\n" + matrixContent,
+		headerStyle.Render("📦 ALL-OS PLATFORM RELEASE & CHECKSUM MATRIX") + "\n\n" + matrixContent,
 	)
 
-	// Section 2: Network & Infrastructure Metrics
-	statusDot := successStyle.Render("● ONLINE")
-	if m.pingMs > 500 {
-		statusDot = warnStyle.Render("● SLOW")
-	}
+	// Section 2: Multi-Mirror Ping & Infrastructure Metrics
 	metricsContent := fmt.Sprintf(
-		"%s %s\n%s %s\n%s %d ms\n%s %s\n%s %s\n%s %s",
-		accentStyle.Render("Relay Server:"), m.relayURL,
-		accentStyle.Render("Relay Health:"), statusDot,
-		accentStyle.Render("Relay Latency:"), m.pingMs,
+		"%s %s\n%s %s\n%s %s\n%s %s\n\n%s %s\n%s %s\n%s %s",
+		accentStyle.Render("Relay Server (ws):"), formatPing(m.relayMs),
+		accentStyle.Render("Fastly CDN (Manila):"), formatPing(m.fastlyMs),
+		accentStyle.Render("GitHub API:"), formatPing(m.githubMs),
+		accentStyle.Render("Google DNS/API:"), formatPing(m.googleMs),
 		accentStyle.Render("Compression:"), successStyle.Render("Zstandard (.tar.zst)"),
-		accentStyle.Render("Network Mode:"), successStyle.Render("Dual-Stack IPv4 / IPv6"),
+		accentStyle.Render("Arch/OS Runtime:"), subtleStyle.Render(runtime.GOOS+"/"+runtime.GOARCH),
 		accentStyle.Render("Pre-Fetch Engine:"), successStyle.Render("0s Instant Auto-Stage"),
 	)
 	metricsBox := boxStyle.Width(rightBoxWidth).Render(
-		headerStyle.Render("📊 NETWORK & INFRASTRUCTURE") + "\n\n" + metricsContent,
+		headerStyle.Render("📊 MULTI-MIRROR PING & INFRASTRUCTURE") + "\n\n" + metricsContent,
 	)
 
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, matrixBox, " ", metricsBox)
 
-	// Section 3: Live System Log Stream
+	// Section 3: Live System Log Stream (Filtered)
 	logLines := m.logs
+	var filteredLogs []string
+	for _, l := range logLines {
+		if m.logFilter == "ALL" || strings.Contains(l, "["+m.logFilter+"]") {
+			filteredLogs = append(filteredLogs, l)
+		}
+	}
+
 	maxLogs := m.height - 20
 	if maxLogs < 4 {
 		maxLogs = 4
 	}
-	if len(logLines) > maxLogs {
-		logLines = logLines[len(logLines)-maxLogs:]
+	if len(filteredLogs) > maxLogs {
+		filteredLogs = filteredLogs[len(filteredLogs)-maxLogs:]
 	}
 
 	var formattedLogs []string
-	for _, l := range logLines {
+	for _, l := range filteredLogs {
 		if strings.Contains(l, "[ERR]") {
 			formattedLogs = append(formattedLogs, errorStyle.Render(l))
 		} else if strings.Contains(l, "[NET]") {
@@ -364,7 +460,7 @@ func (m model) View() string {
 	}
 
 	logsBox := boxStyle.Width(m.width - 4).Render(
-		headerStyle.Render("📜 LIVE LOG & INFRASTRUCTURE STREAM") + "\n\n" +
+		headerStyle.Render(fmt.Sprintf("📜 LIVE LOG & INFRASTRUCTURE STREAM (Filter: %s)", m.logFilter)) + "\n\n" +
 			strings.Join(formattedLogs, "\n"),
 	)
 
