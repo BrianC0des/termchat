@@ -508,15 +508,81 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+const maxInMemMessages = 250
+
+func (m *Model) trimMessagesBuffer() {
+	if len(m.messages) > maxInMemMessages {
+		m.messages = m.messages[len(m.messages)-maxInMemMessages:]
+	}
+}
+
 func (m *Model) handleTabComplete() {
 	val := m.textInput.Value()
+	if val == "" {
+		return
+	}
+
+	// 1. Auto-complete @mentions
+	if idx := strings.LastIndex(val, "@"); idx != -1 {
+		prefix := strings.ToLower(val[idx+1:])
+		peers := m.manager.GetPeers()
+		var candidateNames []string
+		for _, p := range peers {
+			if p.Name != "" {
+				candidateNames = append(candidateNames, p.Name)
+			}
+		}
+		candidateNames = append(candidateNames, "all", "everyone")
+
+		for _, name := range candidateNames {
+			if strings.HasPrefix(strings.ToLower(name), prefix) && strings.ToLower(name) != prefix {
+				m.textInput.SetValue(val[:idx] + "@" + name + " ")
+				m.textInput.SetCursor(len(m.textInput.Value()))
+				return
+			}
+		}
+	}
+
+	// 2. Auto-complete slash command sub-arguments (like /theme <name>)
+	if strings.HasPrefix(val, "/theme ") || strings.HasPrefix(val, "/themes ") {
+		parts := strings.Fields(val)
+		if len(parts) >= 2 {
+			themePrefix := strings.ToLower(parts[1])
+			for k := range Themes {
+				if strings.HasPrefix(k, themePrefix) {
+					m.textInput.SetValue(fmt.Sprintf("/theme %s", k))
+					m.textInput.SetCursor(len(m.textInput.Value()))
+					return
+				}
+			}
+		}
+	}
+
+	// 3. Auto-complete slash commands
+	if strings.HasPrefix(val, "/") && !strings.Contains(val, " ") {
+		cmdList := []string{
+			"/theme", "/themes", "/reply", "/status", "/afk", "/topic",
+			"/pin", "/pins", "/unpin", "/copy", "/files", "/browse",
+			"/clip", "/sidebar", "/clear", "/nick", "/room", "/update",
+			"/help", "/qr", "/send", "/dir", "/connect",
+		}
+		lowerVal := strings.ToLower(val)
+		for _, cmd := range cmdList {
+			if strings.HasPrefix(cmd, lowerVal) && cmd != lowerVal {
+				m.textInput.SetValue(cmd + " ")
+				m.textInput.SetCursor(len(m.textInput.Value()))
+				return
+			}
+		}
+	}
+
+	// 4. Auto-complete file paths for /send
 	if strings.HasPrefix(val, "/send ") || strings.HasPrefix(val, "/file ") {
 		parts := strings.Fields(val)
 		prefix := ""
 		if len(parts) > 1 {
 			prefix = parts[1]
 		}
-		// Expand ~
 		searchPath := prefix
 		if strings.HasPrefix(searchPath, "~") {
 			if home, err := os.UserHomeDir(); err == nil {
@@ -571,6 +637,7 @@ func (m *Model) handleInput(text string) {
 
 	_ = m.manager.SendChat(text)
 
+	m.trimMessagesBuffer()
 	m.viewport.SetContent(m.renderMessages())
 	m.viewport.GotoBottom()
 
@@ -1373,6 +1440,7 @@ func (m *Model) addSystemMsg(text string) {
 		Timestamp:  time.Now(),
 		IsSystem:   true,
 	})
+	m.trimMessagesBuffer()
 	m.viewport.SetContent(m.renderMessages())
 	m.viewport.GotoBottom()
 }

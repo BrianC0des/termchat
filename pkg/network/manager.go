@@ -269,10 +269,18 @@ func (m *Manager) ConnectTo(addr string) {
 		return
 	}
 
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		_ = tcpConn.SetNoDelay(true)
+		_ = tcpConn.SetKeepAlive(true)
+		_ = tcpConn.SetKeepAlivePeriod(15 * time.Second)
+		_ = tcpConn.SetReadBuffer(64 * 1024)
+		_ = tcpConn.SetWriteBuffer(64 * 1024)
+	}
+
 	peerConn := &PeerConnection{
 		RemoteIP:  addr,
 		Conn:      conn,
-		Writer:    bufio.NewWriter(conn),
+		Writer:    bufio.NewWriterSize(conn, 64*1024),
 		Connected: time.Now(),
 	}
 
@@ -292,10 +300,18 @@ func (m *Manager) ConnectTo(addr string) {
 }
 
 func (m *Manager) handleIncomingConnection(conn net.Conn) {
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		_ = tcpConn.SetNoDelay(true)
+		_ = tcpConn.SetKeepAlive(true)
+		_ = tcpConn.SetKeepAlivePeriod(15 * time.Second)
+		_ = tcpConn.SetReadBuffer(64 * 1024)
+		_ = tcpConn.SetWriteBuffer(64 * 1024)
+	}
+
 	peerConn := &PeerConnection{
 		RemoteIP:  conn.RemoteAddr().String(),
 		Conn:      conn,
-		Writer:    bufio.NewWriter(conn),
+		Writer:    bufio.NewWriterSize(conn, 64*1024),
 		Connected: time.Now(),
 	}
 
@@ -634,12 +650,28 @@ func (m *Manager) ConnectRelay(relayURL, roomName string) {
 				u = "wss://" + u
 			}
 
-			conn, _, err := websocket.DefaultDialer.Dial(u, nil)
+			dialer := websocket.Dialer{
+				NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+					var d net.Dialer
+					c, err := d.DialContext(ctx, network, addr)
+					if err != nil {
+						return nil, err
+					}
+					if tcpConn, ok := c.(*net.TCPConn); ok {
+						_ = tcpConn.SetNoDelay(true)
+						_ = tcpConn.SetKeepAlive(true)
+						_ = tcpConn.SetKeepAlivePeriod(15 * time.Second)
+						_ = tcpConn.SetReadBuffer(64 * 1024)
+						_ = tcpConn.SetWriteBuffer(64 * 1024)
+					}
+					return c, nil
+				},
+				HandshakeTimeout: 8 * time.Second,
+			}
+
+			conn, _, err := dialer.Dial(u, nil)
 			if err != nil {
-				if m.events.OnSystemMsg != nil {
-					m.events.OnSystemMsg(fmt.Sprintf("☁️ Cloud Relay connecting to room #%s...", roomName))
-				}
-				time.Sleep(5 * time.Second)
+				time.Sleep(1 * time.Second)
 				continue
 			}
 
@@ -650,6 +682,28 @@ func (m *Manager) ConnectRelay(relayURL, roomName string) {
 			if m.events.OnSystemMsg != nil {
 				m.events.OnSystemMsg(fmt.Sprintf("☁️ Connected to Cloud Room #%s (24/7 Global)", roomName))
 			}
+
+			// Keep-alive heartbeat pinger
+			stopHeartbeat := make(chan struct{})
+			go func() {
+				ticker := time.NewTicker(15 * time.Second)
+				defer ticker.Stop()
+				for {
+					select {
+					case <-stopHeartbeat:
+						return
+					case <-m.ctx.Done():
+						return
+					case <-ticker.C:
+						m.relayMu.Lock()
+						rc := m.relayConn
+						m.relayMu.Unlock()
+						if rc != nil {
+							_ = rc.WriteControl(websocket.PingMessage, []byte("ping"), time.Now().Add(5*time.Second))
+						}
+					}
+				}
+			}()
 
 			// Read loop from relay
 			for {
@@ -717,6 +771,8 @@ func (m *Manager) ConnectRelay(relayURL, roomName string) {
 				m.handlePacket(&PeerConnection{ID: pkt.SenderID, Name: pkt.Sender, RemoteIP: "cloud-relay"}, pkt)
 			}
 
+			close(stopHeartbeat)
+
 			m.relayMu.Lock()
 			m.relayConn = nil
 			m.relayMu.Unlock()
@@ -725,7 +781,7 @@ func (m *Manager) ConnectRelay(relayURL, roomName string) {
 			m.cloudPeers = make(map[string]*PeerConnection)
 			m.cloudPeersMu.Unlock()
 
-			time.Sleep(3 * time.Second)
+			time.Sleep(1 * time.Second)
 		}
 	}()
 }
