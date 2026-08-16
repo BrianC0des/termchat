@@ -1166,6 +1166,9 @@ func (m *Manager) SendFileWithExpiry(filePath, expiry string) error {
 			}
 			shareMsg := fmt.Sprintf("%s Shared file: %s (%s)\n🔗 %s\n⏳ Auto-Expires in: %s\n💡 Type `/get %s` or click the link to download", badge, fileName, FormatBytes(fileSize), dlURL, expiresIn, dlURL)
 			_ = m.SendChat(shareMsg)
+			if m.events.OnMessage != nil {
+				m.events.OnMessage(m.LocalID, m.LocalName, shareMsg, time.Now(), 0, "", "")
+			}
 			if m.events.OnSystemMsg != nil {
 				m.events.OnSystemMsg(fmt.Sprintf("✅ Uploaded and shared '%s' to room #%s (Expires in %s)!", fileName, m.RoomName, expiresIn))
 			}

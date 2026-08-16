@@ -1605,23 +1605,30 @@ func (m *Model) refreshSharedFiles() {
 	var list []SharedFileItem
 	idx := 1
 	for _, msg := range m.messages {
-		if strings.Contains(msg.Content, "📦 Shared file:") && strings.Contains(msg.Content, "🔗 http") {
+		if strings.Contains(msg.Content, "Shared file:") && strings.Contains(msg.Content, "🔗 ") {
 			lines := strings.Split(msg.Content, "\n")
 			fileName := "Shared File"
 			fileURL := ""
 			for _, l := range lines {
-				if strings.HasPrefix(l, "📦 Shared file:") {
-					fileName = strings.TrimSpace(strings.TrimPrefix(l, "📦 Shared file:"))
-				} else if strings.HasPrefix(l, "🔗 ") {
-					fileURL = strings.TrimSpace(strings.TrimPrefix(l, "🔗 "))
+				if strings.Contains(l, "Shared file:") {
+					parts := strings.Split(l, "Shared file:")
+					if len(parts) >= 2 {
+						fileName = strings.TrimSpace(parts[1])
+					}
+				} else if strings.HasPrefix(strings.TrimSpace(l), "🔗 ") {
+					fileURL = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(l), "🔗 "))
 				}
 			}
 			if fileURL != "" {
+				sender := msg.SenderName
+				if msg.IsMe {
+					sender = "You"
+				}
 				list = append(list, SharedFileItem{
 					Index:    idx,
 					FileName: fileName,
 					URL:      fileURL,
-					Sender:   msg.SenderName,
+					Sender:   sender,
 					Time:     msg.Timestamp,
 				})
 				idx++
