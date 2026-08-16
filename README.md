@@ -1,92 +1,96 @@
 # ⚡ TermChat
 
-**TermChat** is a peer-to-peer TUI (Terminal User Interface) companion and messenger designed for instant chat, high-speed file transfers, shared clipboard, and hardware control between your **PC** and your **Phone (Termux)** over local Wi-Fi.
+**TermChat** is a cross-platform, peer-to-peer and cloud-connected TUI (Terminal User Interface) companion and secret messenger for **Windows**, **macOS**, **Linux**, and **Android (Termux)**.
 
-Powered by **Go**, **Bubble Tea**, and **Lip Gloss**.
-
----
-
-## ✨ Features
-
-- 🔍 **Zero-Config LAN Auto-Discovery**: Automatically finds and connects your PC and Termux phone over Wi-Fi (UDP broadcast).
-- 💬 **Live TUI Chat**: Real-time messaging with timestamps, sender tags, auto-scrolling, and responsive layouts.
-- 📁 **High-Speed File Transfers**: Stream files with live progress bars (`/send <path>` or interactive `Ctrl+O` file browser).
-- 📋 **Shared Clipboard Sync**: Seamlessly sync clipboard between PC (`wl-copy`/`xclip`) and Android (`termux-clipboard-set`) with `/clip`.
-- 🔋 **Battery Monitoring**: Query phone battery percentage and charging state directly with `/battery`.
-- 📱 **Hardware Controls**: Ring/vibrate phone (`/ring`), send push notifications (`/notify`), or open browser links (`/open <url>`).
-- 🎵 **Media Remote Control**: Control music/video playback on PC from your phone (`/play`, `/pause`, `/next`).
-- 💻 **Remote Command Runner**: Execute remote shell commands and stream back the terminal output (`/exec <cmd>`).
-- 🔒 **End-to-End Encryption (E2EE)**: Optional AES-256-GCM encrypted room (`/auth <passphrase>`).
-- 📶 **ASCII QR Code Pairing**: Generate an instant QR code in your terminal (`/qr`).
-- 💾 **Persistent Chat History**: Automatically remembers recent messages across sessions (`~/.local/share/termchat/history.jsonl`).
+Powered by **Go**, **Bubble Tea**, **Lip Gloss**, and **24/7 Global WebSockets**.
 
 ---
 
-## 🚀 Quick Setup
+## ⚡ 1-Line Quick Installation (via Terminal)
 
-### 1. On Your PC
-The binary is already built and installed to `~/.local/bin/termchat`:
+Run the command for your operating system to download and install TermChat instantly:
+
+### 📱 Android (Termux)
 ```bash
-termchat
+curl -sSL https://github.com/BrianC0des/termchat/releases/download/v1.0.0/termchat-android-arm64 -o $PREFIX/bin/termchat && chmod +x $PREFIX/bin/termchat
+```
+
+### 🐧 Linux (x86_64 / PC / Laptop)
+```bash
+mkdir -p ~/.local/bin && curl -sSL https://github.com/BrianC0des/termchat/releases/download/v1.0.0/termchat-linux-amd64 -o ~/.local/bin/termchat && chmod +x ~/.local/bin/termchat
+```
+
+### 🐧 Linux (ARM64 / Raspberry Pi)
+```bash
+mkdir -p ~/.local/bin && curl -sSL https://github.com/BrianC0des/termchat/releases/download/v1.0.0/termchat-linux-arm64 -o ~/.local/bin/termchat && chmod +x ~/.local/bin/termchat
+```
+
+### 🍎 macOS (Apple Silicon M1/M2/M3/M4)
+```bash
+sudo curl -sSL https://github.com/BrianC0des/termchat/releases/download/v1.0.0/termchat-mac-apple-silicon -o /usr/local/bin/termchat && sudo chmod +x /usr/local/bin/termchat
+```
+
+### 🍎 macOS (Intel)
+```bash
+sudo curl -sSL https://github.com/BrianC0des/termchat/releases/download/v1.0.0/termchat-mac-intel -o /usr/local/bin/termchat && sudo chmod +x /usr/local/bin/termchat
+```
+
+### 🪟 Windows (PowerShell)
+```powershell
+Invoke-WebRequest -Uri "https://github.com/BrianC0des/termchat/releases/download/v1.0.0/termchat-windows.exe" -OutFile "$HOME\termchat.exe"
 ```
 
 ---
 
-### 2. On Your Phone (Termux)
+## 🚀 How to Launch & Create Rooms
 
-Make sure your phone and PC are connected to the same Wi-Fi (or mobile hotspot).
+### 1. Join a 24/7 Cloud Room (Works Anywhere in the World):
+```bash
+termchat -name "YourNick" -room "secret-squad" -pass "mysecretpassword123"
+```
+*(Connected via the 24/7 Global Relay at `wss://termchat-o51d.onrender.com/ws`)*
 
-**One-line install from PC:**
-1. On your PC:
-   ```bash
-   cd ~/Projects/termchat
-   ./serve-termux.sh
-   ```
-2. In **Termux** on your phone:
-   ```bash
-   curl -sSL http://<YOUR_PC_IP>:8000/dist/termchat-arm64 -o $PREFIX/bin/termchat && chmod +x $PREFIX/bin/termchat
-   ```
-3. Run on Termux:
-   ```bash
-   termchat
-   ```
+### 2. Local Wi-Fi Mode (Zero-Config Auto-Discovery):
+```bash
+termchat
+```
+*(Automatically discovers and connects to all devices on the same Wi-Fi without internet!)*
 
 ---
 
-## ⌨️ Full Command Cheatsheet
+## ⌨️ Command Cheatsheet (Inside Chat)
 
-| Command | Key / Shortcut | Description | Example |
-|---|---|---|---|
-| `/browse` | `Ctrl + O` | Open interactive file explorer to pick and send files | `Ctrl+O` |
-| `/send <path>` | `Tab` autocompletion | Send a file directly by path | `/send ~/Pictures/photo.jpg` |
-| `/clip` or `/c` | | Sync local clipboard to connected device | `/clip` |
-| `/battery` | | Check peer device battery % & charging status | `/battery` |
-| `/notify <msg>` | | Send a native popup notification to phone screen | `/notify Pick up groceries!` |
-| `/ring` or `/find` | | Ring/vibrate phone at max volume to locate it | `/ring` |
-| `/open <url>` | | Open a web link in peer's default browser | `/open https://github.com` |
-| `/play` / `/next` | | Play/Pause/Skip media playback | `/play`, `/next`, `/prev` |
-| `/exec <cmd>` | | Run shell command on peer and stream output | `/exec uname -a` |
-| `/auth <pass>` | | Enable End-to-End AES-256 Encryption | `/auth secret123` |
-| `/qr` | | Display ASCII QR Code for instant pairing | `/qr` |
-| `/nick <name>` | | Change your chat display name on the fly | `/nick AndroidPhone` |
-| `/dir <path>` | | Change incoming downloads folder | `/dir ~/storage/downloads` |
-| `/ip` / `/peers` | | Show local IP addresses & connected peers | `/ip`, `/peers` |
-| `/help` | `F1` | Show interactive help modal | `/help` |
-| `/clear` | | Clear chat history screen | `/clear` |
-| `/quit` | `Ctrl + C` | Exit TermChat | `/quit` |
+| Command | Shortcut | Description |
+|---|---|---|
+| `/room <name> [pass]` | | Create or join a 24/7 Cloud room with optional AES-256 password |
+| `/auth <pass>` | | Lock or unlock AES-256 End-to-End Encryption in current chat |
+| `/copy` or `/cp` | | Copy the latest message to your OS clipboard (`/copy all` for full log) |
+| `/paste` or `/p` | `Ctrl + V` | Paste system clipboard directly into chat bar |
+| `/browse` | `Ctrl + O` | Open interactive file explorer to select & send files |
+| `/send <filepath>` | `Tab` | Send file to everyone in the room |
+| `/clip` or `/c` | | Push your clipboard directly to connected peers |
+| `/battery` | | Query phone battery percentage and charging status |
+| `/ring` or `/find` | | Ring/vibrate connected mobile device |
+| `/notify <msg>` | | Push notification popup to phone lock screen |
+| `@agy <prompt>` | | Ask Antigravity AI anything directly in the chatroom |
+| `/ip` / `/peers` | | Show local network info and connected peers |
+| `/clear` | | Clear screen messages |
+| `/help` | `F1` | Open in-app help cheatsheet |
+| `/quit` | `Ctrl + C` | Exit TermChat |
 
 ---
 
-## 📱 Termux Integration & Permissions
+## 🔒 Security & Privacy
+- **End-to-End Encryption**: When a room has a password (`-pass` or `/auth`), messages and files are encrypted with **AES-256-GCM** before leaving your device.
+- **Zero Server Logging**: The relay server acts purely as a stateless WebSocket router and cannot decrypt any password-protected traffic.
 
-To enable all phone hardware features in Termux:
-1. Install Termux:API addon from F-Droid or GitHub.
-2. Inside Termux, run:
-   ```bash
-   pkg install termux-api
-   termux-setup-storage
-   ```
-3. In TermChat on phone, set your download folder to your Android gallery/downloads:
-   ```text
-   /dir ~/storage/downloads
-   ```
+---
+
+## 🛠️ Building From Source
+
+```bash
+git clone https://github.com/BrianC0des/termchat.git
+cd termchat
+./build-all.sh
+```
+Binary outputs will be placed in `./dist/`.
