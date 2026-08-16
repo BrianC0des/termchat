@@ -11,6 +11,7 @@ type Config struct {
 	Nickname       string `json:"nickname,omitempty"`
 	DownloadDir    string `json:"download_dir,omitempty"`
 	AuthPassphrase string `json:"auth_passphrase,omitempty"`
+	Theme          string `json:"theme,omitempty"`
 }
 
 func getConfigPath() string {

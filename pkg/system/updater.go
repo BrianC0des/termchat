@@ -91,14 +91,14 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 
 	latestTag, err := FetchLatestVersionTag()
 	if err == nil && latestTag != "" {
-		if strings.EqualFold(latestTag, AppVersion) {
+		if strings.EqualFold(latestTag, AppVersion) || latestTag <= AppVersion {
 			return fmt.Sprintf("✨ You are already on the latest version of TermChat (%s)!", AppVersion), nil
 		}
 		if onProgress != nil {
 			onProgress(fmt.Sprintf("⚡ Found new version: %s (Current: %s)", latestTag, AppVersion))
 		}
 	} else {
-		latestTag = "latest"
+		latestTag = AppVersion
 	}
 
 	binaryName := getPlatformBinaryName()
@@ -131,6 +131,15 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 		return "", fmt.Errorf("failed to download update (HTTP %d)", resp.StatusCode)
 	}
 
+	totalSize := resp.ContentLength
+	if onProgress != nil {
+		if totalSize > 0 {
+			onProgress(fmt.Sprintf("⚡ Downloading TermChat update (%.1f MB)...", float64(totalSize)/(1024*1024)))
+		} else {
+			onProgress("⚡ Downloading TermChat update...")
+		}
+	}
+
 	tmpFile, err := os.CreateTemp(filepath.Dir(execPath), "termchat-update-*")
 	if err != nil {
 		tmpFile, err = os.CreateTemp("", "termchat-update-*")
@@ -143,41 +152,11 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 		_ = os.Remove(tmpPath)
 	}()
 
-	totalSize := resp.ContentLength
-	var downloaded int64
-	buf := make([]byte, 32*1024)
-	lastReport := time.Now()
-
-	for {
-		n, rErr := resp.Body.Read(buf)
-		if n > 0 {
-			_, wErr := tmpFile.Write(buf[:n])
-			if wErr != nil {
-				_ = tmpFile.Close()
-				return "", fmt.Errorf("failed to write temp file: %w", wErr)
-			}
-			downloaded += int64(n)
-
-			if onProgress != nil && time.Since(lastReport) > 500*time.Millisecond {
-				lastReport = time.Now()
-				if totalSize > 0 {
-					pct := (downloaded * 100) / totalSize
-					onProgress(fmt.Sprintf("⚡ Downloading update: %.1f MB / %.1f MB (%d%%)...",
-						float64(downloaded)/(1024*1024), float64(totalSize)/(1024*1024), pct))
-				} else {
-					onProgress(fmt.Sprintf("⚡ Downloading update: %.1f MB...", float64(downloaded)/(1024*1024)))
-				}
-			}
-		}
-		if rErr != nil {
-			if rErr == io.EOF {
-				break
-			}
-			_ = tmpFile.Close()
-			return "", fmt.Errorf("error reading download stream: %w", rErr)
-		}
-	}
+	_, err = io.Copy(tmpFile, resp.Body)
 	_ = tmpFile.Close()
+	if err != nil {
+		return "", fmt.Errorf("error writing download: %w", err)
+	}
 
 	_ = os.Chmod(tmpPath, 0755)
 

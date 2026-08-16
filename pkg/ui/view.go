@@ -190,10 +190,18 @@ func (m *Model) renderSidebar(peers []network.PeerConnection) string {
 		if len(myName) > 9 {
 			myName = myName[:7] + ".."
 		}
-		sb.WriteString(fmt.Sprintf("%s %s %s\n",
+		statusStr := ""
+		if m.myStatus != "" {
+			statusStr = " " + m.myStatus
+			if len(statusStr) > 12 {
+				statusStr = statusStr[:10] + ".."
+			}
+		}
+		sb.WriteString(fmt.Sprintf("%s %s %s%s\n",
 			lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A")).Render("●"),
 			lipgloss.NewStyle().Foreground(lipgloss.Color("#C0CAF5")).Render(myName),
 			lipgloss.NewStyle().Foreground(lipgloss.Color("#E0AF68")).Render("(You)"),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#7AA2F7")).Render(statusStr),
 		))
 
 		// Show Connected Peers
@@ -202,12 +210,20 @@ func (m *Model) renderSidebar(peers []network.PeerConnection) string {
 		} else {
 			for _, p := range peers {
 				peerName := p.Name
-				if len(peerName) > 13 {
-					peerName = peerName[:11] + ".."
+				peerStatus := ""
+				if st, ok := m.userStatuses[p.Name]; ok && st != "" {
+					peerStatus = " " + st
+					if len(peerStatus) > 12 {
+						peerStatus = peerStatus[:10] + ".."
+					}
 				}
-				sb.WriteString(fmt.Sprintf("%s %s\n",
+				if len(peerName) > 11 {
+					peerName = peerName[:9] + ".."
+				}
+				sb.WriteString(fmt.Sprintf("%s %s%s\n",
 					lipgloss.NewStyle().Foreground(lipgloss.Color("#9ECE6A")).Render("●"),
 					lipgloss.NewStyle().Foreground(lipgloss.Color("#7DCFFF")).Render(peerName),
+					lipgloss.NewStyle().Foreground(lipgloss.Color("#7AA2F7")).Render(peerStatus),
 				))
 			}
 		}
@@ -216,7 +232,9 @@ func (m *Model) renderSidebar(peers []network.PeerConnection) string {
 	sb.WriteString("\n")
 	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7AA2F7")).Render("QUICK ACTIONS"))
 	sb.WriteString("\n")
-	sb.WriteString(fmt.Sprintf("%s /copy <#> [Copy]\n%s /files [Ctrl+F]\n%s /browse [Ctrl+O]\n%s /clip [Sync]\n%s /qr [QR]",
+	sb.WriteString(fmt.Sprintf("%s /reply <#> [Reply]\n%s /theme [Themes]\n%s /status [Status]\n%s /pin [Pins]\n%s /copy <#> [Copy]\n%s /files [Ctrl+F]\n%s /browse [Ctrl+O]",
+		HelpKeyStyle.Render("•"),
+		HelpKeyStyle.Render("•"),
 		HelpKeyStyle.Render("•"),
 		HelpKeyStyle.Render("•"),
 		HelpKeyStyle.Render("•"),

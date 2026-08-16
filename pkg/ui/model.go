@@ -18,13 +18,16 @@ import (
 )
 
 type ChatMessage struct {
-	SenderID   string
-	SenderName string
-	Content    string
-	Timestamp  time.Time
-	IsMe       bool
-	IsSystem   bool
-	IsFile     bool
+	SenderID      string
+	SenderName    string
+	Content       string
+	Timestamp     time.Time
+	IsMe          bool
+	IsSystem      bool
+	IsFile        bool
+	ReplyToNum    int
+	ReplyToSender string
+	ReplyToText   string
 }
 
 type SharedFileItem struct {
@@ -37,15 +40,15 @@ type SharedFileItem struct {
 }
 
 type Model struct {
-	manager       *network.Manager
-	messages      []ChatMessage
-	transfers     map[string]network.FileTransferProgress
-	viewport      viewport.Model
-	textInput     textinput.Model
-	filePicker    *FilePicker
-	width         int
-	height        int
-	ready         bool
+	manager             *network.Manager
+	messages            []ChatMessage
+	transfers           map[string]network.FileTransferProgress
+	viewport            viewport.Model
+	textInput           textinput.Model
+	filePicker          *FilePicker
+	width               int
+	height              int
+	ready               bool
 	showHelp            bool
 	showQR              bool
 	qrContent           string
@@ -55,14 +58,37 @@ type Model struct {
 	sharedFiles     []SharedFileItem
 	showFilesModal  bool
 	selectedFileIdx int
+
+	roomTopic    string
+	pinnedMsgs   []ChatMessage
+	userStatuses map[string]string
+	myStatus     string
 }
 
 // Custom Tea Messages
 type incomingMsg struct {
-	senderID   string
+	senderID      string
+	senderName    string
+	text          string
+	ts            time.Time
+	replyNum      int
+	replySender   string
+	replyText     string
+}
+
+type statusUpdateMsg struct {
 	senderName string
-	text       string
-	ts         time.Time
+	statusText string
+}
+
+type topicUpdateMsg struct {
+	senderName string
+	topicText  string
+}
+
+type pinUpdateMsg struct {
+	senderName string
+	pinText    string
 }
 
 type peerUpdateMsg struct {
@@ -129,16 +155,22 @@ func NewModel(mgr *network.Manager) *Model {
 		}(cfg.LastRemotePeer)
 	}
 
+	if cfg.Theme != "" {
+		ApplyTheme(cfg.Theme)
+	}
+
 	return &Model{
-		manager:       mgr,
-		messages:      initialMsgs,
-		transfers:     make(map[string]network.FileTransferProgress),
-		textInput:     ti,
+		manager:             mgr,
+		messages:            initialMsgs,
+		transfers:           make(map[string]network.FileTransferProgress),
+		textInput:           ti,
 		filePicker:          NewFilePicker(),
 		showHelp:            false,
 		showQR:              false,
 		showMembersDropdown: true,
 		peerBatteries:       make(map[string]system.BatteryInfo),
+		userStatuses:        make(map[string]string),
+		pinnedMsgs:          make([]ChatMessage, 0),
 	}
 }
 
@@ -332,12 +364,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case incomingMsg:
 		msgEntry := ChatMessage{
-			SenderID:   msg.senderID,
-			SenderName: msg.senderName,
-			Content:    msg.text,
-			Timestamp:  msg.ts,
-			IsMe:       false,
-			IsSystem:   false,
+			SenderID:      msg.senderID,
+			SenderName:    msg.senderName,
+			Content:       msg.text,
+			Timestamp:     msg.ts,
+			IsMe:          false,
+			IsSystem:      false,
+			ReplyToNum:    msg.replyNum,
+			ReplyToSender: msg.replySender,
+			ReplyToText:   msg.replyText,
 		}
 		m.messages = append(m.messages, msgEntry)
 		system.AppendHistory(m.manager.RoomName, system.HistoryEntry{
@@ -348,6 +383,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			IsMe:       false,
 			IsSystem:   false,
 		})
+
+		// Check for @mentions of local user or @all
+		myMention := "@" + strings.ToLower(m.manager.LocalName)
+		lowerText := strings.ToLower(msg.text)
+		if msg.senderID != m.manager.LocalID && (strings.Contains(lowerText, myMention) || strings.Contains(lowerText, "@all") || strings.Contains(lowerText, "@everyone")) {
+			fmt.Print("\a") // Terminal audio chime
+			_ = system.SendNotification(fmt.Sprintf("Mentioned by %s in TermChat", msg.senderName), msg.text)
+		}
+
 		m.viewport.SetContent(m.renderMessages())
 		m.viewport.GotoBottom()
 
@@ -355,6 +399,32 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.senderID != "agy-bot" && (strings.Contains(strings.ToLower(msg.text), "@agy") || strings.HasPrefix(strings.ToLower(msg.text), "/agy")) {
 			m.handleAGYMention(msg.text)
 		}
+
+	case statusUpdateMsg:
+		if m.userStatuses == nil {
+			m.userStatuses = make(map[string]string)
+		}
+		if msg.statusText == "" {
+			delete(m.userStatuses, msg.senderName)
+		} else {
+			m.userStatuses[msg.senderName] = msg.statusText
+		}
+		return m, nil
+
+	case topicUpdateMsg:
+		m.roomTopic = msg.topicText
+		m.addSystemMsg(fmt.Sprintf("📌 %s set Room Topic to: \"%s\"", msg.senderName, msg.topicText))
+		m.viewport.SetContent(m.renderMessages())
+		return m, nil
+
+	case pinUpdateMsg:
+		m.pinnedMsgs = append(m.pinnedMsgs, ChatMessage{
+			SenderName: msg.senderName,
+			Content:    msg.pinText,
+			Timestamp:  time.Now(),
+		})
+		m.addSystemMsg(fmt.Sprintf("📌 %s pinned: \"%s\"", msg.senderName, msg.pinText))
+		return m, nil
 
 	case peerUpdateMsg:
 		if msg.name != "" {
@@ -587,6 +657,187 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		} else {
 			m.addSystemMsg("📋 No messages found to copy.")
 		}
+
+	case "/reply", "/r":
+		if len(parts) < 3 {
+			m.addSystemMsg("Usage: /reply <#msg> <your message>  (e.g., /reply 2 Yes, I agree!)")
+			return
+		}
+		num, err := strconv.Atoi(parts[1])
+		if err != nil {
+			m.addSystemMsg("❌ Invalid message number. Usage: /reply <#msg> <your message>")
+			return
+		}
+		userMsgCount := 0
+		var targetMsg *ChatMessage
+		for i := range m.messages {
+			if !m.messages[i].IsSystem {
+				userMsgCount++
+				if userMsgCount == num {
+					targetMsg = &m.messages[i]
+					break
+				}
+			}
+		}
+		if targetMsg == nil {
+			m.addSystemMsg(fmt.Sprintf("❌ Message #%d not found. This room has %d chat message(s).", num, userMsgCount))
+			return
+		}
+		replyContent := strings.Join(parts[2:], " ")
+		snippet := targetMsg.Content
+		if len(snippet) > 40 {
+			snippet = snippet[:37] + "..."
+		}
+		_ = m.manager.SendReply(num, targetMsg.SenderName, snippet, replyContent)
+		m.messages = append(m.messages, ChatMessage{
+			SenderID:      m.manager.LocalID,
+			SenderName:    m.manager.LocalName,
+			Content:       replyContent,
+			Timestamp:     time.Now(),
+			IsMe:          true,
+			ReplyToNum:    num,
+			ReplyToSender: targetMsg.SenderName,
+			ReplyToText:   snippet,
+		})
+		m.viewport.SetContent(m.renderMessages())
+		m.viewport.GotoBottom()
+
+	case "/theme", "/themes":
+		if len(parts) < 2 {
+			var sb strings.Builder
+			sb.WriteString("🎨 Available Themes:\n")
+			for k, v := range Themes {
+				marker := "  "
+				if k == CurrentTheme {
+					marker = "👉"
+				}
+				sb.WriteString(fmt.Sprintf("%s • /theme %-12s - %s\n", marker, k, v.Name))
+			}
+			sb.WriteString("💡 Type `/theme <name>` to switch instantly!")
+			m.addSystemMsg(sb.String())
+			return
+		}
+		targetTheme := strings.ToLower(parts[1])
+		if ApplyTheme(targetTheme) {
+			cfg := system.LoadConfig()
+			cfg.Theme = targetTheme
+			system.SaveConfig(cfg)
+			m.addSystemMsg(fmt.Sprintf("🎨 Theme switched to '%s' (saved as default)!", Themes[targetTheme].Name))
+			m.viewport.SetContent(m.renderMessages())
+		} else {
+			m.addSystemMsg(fmt.Sprintf("❌ Unknown theme '%s'. Type `/themes` to see available palettes.", targetTheme))
+		}
+
+	case "/status":
+		if len(parts) < 2 {
+			if m.myStatus != "" {
+				m.addSystemMsg(fmt.Sprintf("🏷️ Current status: %s (Type `/status clear` to remove)", m.myStatus))
+			} else {
+				m.addSystemMsg("Usage: /status <custom status> (e.g., /status 💻 Coding in Go)")
+			}
+			return
+		}
+		newStatus := strings.Join(parts[1:], " ")
+		if strings.ToLower(newStatus) == "clear" || strings.ToLower(newStatus) == "none" {
+			newStatus = ""
+		}
+		m.myStatus = newStatus
+		_ = m.manager.SendStatus(newStatus)
+		if newStatus != "" {
+			m.addSystemMsg(fmt.Sprintf("🏷️ Status set to: %s", newStatus))
+		} else {
+			m.addSystemMsg("🏷️ Status cleared.")
+		}
+
+	case "/afk":
+		afkMsg := "☕ AFK"
+		if len(parts) > 1 {
+			afkMsg = "☕ AFK: " + strings.Join(parts[1:], " ")
+		}
+		m.myStatus = afkMsg
+		_ = m.manager.SendStatus(afkMsg)
+		m.addSystemMsg(fmt.Sprintf("🏷️ Status set to: %s", afkMsg))
+
+	case "/topic":
+		if len(parts) < 2 {
+			if m.roomTopic != "" {
+				m.addSystemMsg(fmt.Sprintf("📌 Room Topic: \"%s\"", m.roomTopic))
+			} else {
+				m.addSystemMsg("Usage: /topic <room description/topic>")
+			}
+			return
+		}
+		newTopic := strings.Join(parts[1:], " ")
+		if strings.ToLower(newTopic) == "clear" {
+			newTopic = ""
+		}
+		m.roomTopic = newTopic
+		_ = m.manager.SendTopic(newTopic)
+		if newTopic != "" {
+			m.addSystemMsg(fmt.Sprintf("📌 Room Topic updated to: \"%s\"", newTopic))
+		} else {
+			m.addSystemMsg("📌 Room Topic cleared.")
+		}
+		m.viewport.SetContent(m.renderMessages())
+
+	case "/pin":
+		if len(parts) < 2 {
+			m.addSystemMsg("Usage: /pin <#msg>  (e.g., /pin 1)")
+			return
+		}
+		num, err := strconv.Atoi(parts[1])
+		if err != nil {
+			m.addSystemMsg("❌ Invalid message number. Usage: /pin <#msg>")
+			return
+		}
+		userMsgCount := 0
+		var targetMsg *ChatMessage
+		for i := range m.messages {
+			if !m.messages[i].IsSystem {
+				userMsgCount++
+				if userMsgCount == num {
+					targetMsg = &m.messages[i]
+					break
+				}
+			}
+		}
+		if targetMsg == nil {
+			m.addSystemMsg(fmt.Sprintf("❌ Message #%d not found.", num))
+			return
+		}
+		m.pinnedMsgs = append(m.pinnedMsgs, *targetMsg)
+		_ = m.manager.SendPin(fmt.Sprintf("[%s]: %s", targetMsg.SenderName, targetMsg.Content))
+		m.addSystemMsg(fmt.Sprintf("📌 Pinned message #%d (%s: \"%s\")", num, targetMsg.SenderName, targetMsg.Content))
+
+	case "/pins":
+		if len(m.pinnedMsgs) == 0 {
+			m.addSystemMsg("📌 No pinned messages in this room yet. (Use `/pin <#>` to pin)")
+			return
+		}
+		var sb strings.Builder
+		sb.WriteString("📌 Pinned Messages in this Room:\n")
+		for i, pin := range m.pinnedMsgs {
+			sb.WriteString(fmt.Sprintf("   [%d] [%s] %s: %s\n", i+1, pin.Timestamp.Format("15:04"), pin.SenderName, pin.Content))
+		}
+		m.addSystemMsg(sb.String())
+
+	case "/unpin":
+		if len(m.pinnedMsgs) == 0 {
+			m.addSystemMsg("📌 No pinned messages to remove.")
+			return
+		}
+		if len(parts) < 2 {
+			m.pinnedMsgs = []ChatMessage{}
+			m.addSystemMsg("📌 Cleared all pinned messages.")
+			return
+		}
+		idx, err := strconv.Atoi(parts[1])
+		if err != nil || idx < 1 || idx > len(m.pinnedMsgs) {
+			m.addSystemMsg(fmt.Sprintf("❌ Invalid pin index. Range: 1-%d", len(m.pinnedMsgs)))
+			return
+		}
+		m.pinnedMsgs = append(m.pinnedMsgs[:idx-1], m.pinnedMsgs[idx:]...)
+		m.addSystemMsg(fmt.Sprintf("📌 Removed pinned message #%d.", idx))
 
 	case "/paste", "/p":
 		clipText, err := system.ReadClipboard()
@@ -1100,6 +1351,17 @@ func (m *Model) renderMessages() string {
 	bodyStyle := MessageText.Width(wrapWidth)
 
 	var sb strings.Builder
+
+	if m.roomTopic != "" {
+		topicBanner := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#E0AF68")).
+			Background(lipgloss.Color("#1F2335")).
+			Bold(true).
+			Padding(0, 1).
+			Render(fmt.Sprintf("📌 ROOM TOPIC: %s", m.roomTopic))
+		sb.WriteString(topicBanner + "\n\n")
+	}
+
 	msgIdx := 1
 	for _, msg := range m.messages {
 		if msg.IsSystem {
@@ -1110,19 +1372,36 @@ func (m *Model) renderMessages() string {
 				sb.WriteString(fmt.Sprintf("%s %s %s\n\n", timeStr, SenderSystemStyle.Render("SYSTEM ❯"), bodyStyle.Render(msg.Content)))
 			}
 		} else {
+			if msg.ReplyToNum > 0 {
+				replyQuote := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#565F89")).
+					Italic(true).
+					Render(fmt.Sprintf("   ┌─ 💬 Replying to #%d (%s: \"%s\")", msg.ReplyToNum, msg.ReplyToSender, msg.ReplyToText))
+				sb.WriteString(replyQuote + "\n")
+			}
+
 			numBadge := lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Render(fmt.Sprintf("#%d", msgIdx))
 			timeStr := TimeStyle.Render(msg.Timestamp.Format("15:04:05"))
 			prefix := fmt.Sprintf("%s %s", timeStr, numBadge)
 
+			renderedContent := msg.Content
+			myMention := "@" + m.manager.LocalName
+			if strings.Contains(strings.ToLower(renderedContent), strings.ToLower(myMention)) || strings.Contains(strings.ToLower(renderedContent), "@all") {
+				highlightStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFE600"))
+				renderedContent = highlightStyle.Render(renderedContent)
+			} else {
+				renderedContent = bodyStyle.Render(renderedContent)
+			}
+
 			if msg.SenderName == "🤖 AGY" || strings.Contains(msg.SenderName, "AGY") {
 				nameTag := SenderBotStyle.Render(fmt.Sprintf("[%s]", msg.SenderName))
-				sb.WriteString(fmt.Sprintf("%s %s:\n%s\n\n", prefix, nameTag, bodyStyle.Render(msg.Content)))
+				sb.WriteString(fmt.Sprintf("%s %s:\n%s\n\n", prefix, nameTag, renderedContent))
 			} else if msg.IsMe {
 				nameTag := SenderMeStyle.Render(fmt.Sprintf("[%s]", msg.SenderName))
-				sb.WriteString(fmt.Sprintf("%s %s: %s\n\n", prefix, nameTag, bodyStyle.Render(msg.Content)))
+				sb.WriteString(fmt.Sprintf("%s %s: %s\n\n", prefix, nameTag, renderedContent))
 			} else {
 				nameTag := SenderPeerStyle.Render(fmt.Sprintf("[%s]", msg.SenderName))
-				sb.WriteString(fmt.Sprintf("%s %s: %s\n\n", prefix, nameTag, bodyStyle.Render(msg.Content)))
+				sb.WriteString(fmt.Sprintf("%s %s: %s\n\n", prefix, nameTag, renderedContent))
 			}
 			msgIdx++
 		}
@@ -1132,12 +1411,15 @@ func (m *Model) renderMessages() string {
 
 func SetupEventBridge(p *tea.Program) network.NetworkEvents {
 	return network.NetworkEvents{
-		OnMessage: func(senderID, senderName, text string, ts time.Time) {
+		OnMessage: func(senderID, senderName, text string, ts time.Time, replyNum int, replySender, replyText string) {
 			p.Send(incomingMsg{
-				senderID:   senderID,
-				senderName: senderName,
-				text:       text,
-				ts:         ts,
+				senderID:      senderID,
+				senderName:    senderName,
+				text:          text,
+				ts:            ts,
+				replyNum:      replyNum,
+				replySender:   replySender,
+				replyText:     replyText,
 			})
 		},
 		OnPeerJoin: func(id, name, addr string) {
@@ -1169,11 +1451,14 @@ func SetupEventBridge(p *tea.Program) network.NetworkEvents {
 				senderName: senderName,
 			})
 		},
-		OnBattery: func(senderName string, info system.BatteryInfo) {
-			p.Send(batteryMsg{
-				senderName: senderName,
-				info:       info,
-			})
+		OnStatus: func(senderName, statusText string) {
+			p.Send(statusUpdateMsg{senderName: senderName, statusText: statusText})
+		},
+		OnTopic: func(senderName, topicText string) {
+			p.Send(topicUpdateMsg{senderName: senderName, topicText: topicText})
+		},
+		OnPin: func(senderName, pinText string) {
+			p.Send(pinUpdateMsg{senderName: senderName, pinText: pinText})
 		},
 		OnExecOutput: func(senderName, cmd, output string, isError bool) {
 			p.Send(execOutputMsg{

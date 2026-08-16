@@ -30,6 +30,9 @@ const (
 	MsgTypeExecReq     MsgType = "exec_req"
 	MsgTypeExecResp    MsgType = "exec_resp"
 	MsgTypeEncrypted   MsgType = "encrypted"
+	MsgTypeStatus      MsgType = "status"
+	MsgTypeTopic       MsgType = "topic"
+	MsgTypePin         MsgType = "pin"
 )
 
 type Packet struct {
@@ -41,6 +44,11 @@ type Packet struct {
 
 	// Chat & text payload
 	Content string `json:"content,omitempty"`
+
+	// Reply payload
+	ReplyToNum    int    `json:"reply_to_num,omitempty"`
+	ReplyToSender string `json:"reply_to_sender,omitempty"`
+	ReplyToText   string `json:"reply_to_text,omitempty"`
 
 	// File transfer payload
 	FileID     string `json:"file_id,omitempty"`

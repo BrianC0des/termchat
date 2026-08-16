@@ -51,13 +51,15 @@ type FileTransferProgress struct {
 }
 
 type NetworkEvents struct {
-	OnMessage      func(senderID, senderName, text string, ts time.Time)
+	OnMessage      func(senderID, senderName, text string, ts time.Time, replyNum int, replySender, replyText string)
 	OnPeerJoin     func(id, name, addr string)
 	OnPeerLeave    func(id, name string)
 	OnSystemMsg    func(text string)
 	OnFileProgress func(p FileTransferProgress)
 	OnFileReceived func(fileName, savedPath string, size int64, senderName string)
-	OnBattery      func(senderName string, info system.BatteryInfo)
+	OnStatus       func(senderName, statusText string)
+	OnTopic        func(senderName, topicText string)
+	OnPin          func(senderName, pinText string)
 	OnExecOutput   func(senderName, cmd, output string, isError bool)
 }
 
@@ -407,31 +409,28 @@ func (m *Manager) handlePacket(p *PeerConnection, pkt *Packet) {
 
 	case MsgTypeChat:
 		if m.events.OnMessage != nil {
-			m.events.OnMessage(pkt.SenderID, pkt.Sender, pkt.Content, pkt.Timestamp)
+			m.events.OnMessage(pkt.SenderID, pkt.Sender, pkt.Content, pkt.Timestamp, pkt.ReplyToNum, pkt.ReplyToSender, pkt.ReplyToText)
+		}
+
+	case MsgTypeStatus:
+		if m.events.OnStatus != nil {
+			m.events.OnStatus(pkt.Sender, pkt.Content)
+		}
+
+	case MsgTypeTopic:
+		if m.events.OnTopic != nil {
+			m.events.OnTopic(pkt.Sender, pkt.Content)
+		}
+
+	case MsgTypePin:
+		if m.events.OnPin != nil {
+			m.events.OnPin(pkt.Sender, pkt.Content)
 		}
 
 	case MsgTypeClipboard:
 		_ = system.WriteClipboard(pkt.Content)
 		if m.events.OnSystemMsg != nil {
 			m.events.OnSystemMsg(fmt.Sprintf("📋 Clipboard synced from %s (%d chars)", pkt.Sender, len(pkt.Content)))
-		}
-
-	case MsgTypeBatteryReq:
-		if info, err := system.GetBatteryInfo(); err == nil {
-			data, _ := json.Marshal(info)
-			_ = m.sendToPeer(p, &Packet{
-				Type:      MsgTypeBatteryResp,
-				SenderID:  m.LocalID,
-				Sender:    m.LocalName,
-				Timestamp: time.Now(),
-				ExtraData: string(data),
-			})
-		}
-
-	case MsgTypeBatteryResp:
-		var info system.BatteryInfo
-		if err := json.Unmarshal([]byte(pkt.ExtraData), &info); err == nil && m.events.OnBattery != nil {
-			m.events.OnBattery(pkt.Sender, info)
 		}
 
 	case MsgTypeNotify:
@@ -1196,4 +1195,69 @@ func FormatBytes(b int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(b)/float64(div), "KMGTPE"[exp])
+}
+
+func (m *Manager) SendReply(replyToNum int, replyToSender, replyToText, content string) error {
+	p := &Packet{
+		Type:          MsgTypeChat,
+		SenderID:      m.LocalID,
+		Sender:        m.LocalName,
+		Timestamp:     time.Now(),
+		Content:       content,
+		ReplyToNum:    replyToNum,
+		ReplyToSender: replyToSender,
+		ReplyToText:   replyToText,
+	}
+
+	if m.EncryptionKey != nil {
+		rawJSON, _ := json.Marshal(p)
+		encryptedText, err := system.Encrypt(string(rawJSON), m.EncryptionKey)
+		if err == nil {
+			p = &Packet{
+				Type:          MsgTypeEncrypted,
+				SenderID:      m.LocalID,
+				Sender:        m.LocalName,
+				Timestamp:     time.Now(),
+				Content:       encryptedText,
+				ReplyToNum:    replyToNum,
+				ReplyToSender: replyToSender,
+				ReplyToText:   replyToText,
+			}
+		}
+	}
+
+	return m.SendPacket(p)
+}
+
+func (m *Manager) SendStatus(statusText string) error {
+	p := &Packet{
+		Type:      MsgTypeStatus,
+		SenderID:  m.LocalID,
+		Sender:    m.LocalName,
+		Timestamp: time.Now(),
+		Content:   statusText,
+	}
+	return m.SendPacket(p)
+}
+
+func (m *Manager) SendTopic(topicText string) error {
+	p := &Packet{
+		Type:      MsgTypeTopic,
+		SenderID:  m.LocalID,
+		Sender:    m.LocalName,
+		Timestamp: time.Now(),
+		Content:   topicText,
+	}
+	return m.SendPacket(p)
+}
+
+func (m *Manager) SendPin(pinText string) error {
+	p := &Packet{
+		Type:      MsgTypePin,
+		SenderID:  m.LocalID,
+		Sender:    m.LocalName,
+		Timestamp: time.Now(),
+		Content:   pinText,
+	}
+	return m.SendPacket(p)
 }
