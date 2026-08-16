@@ -106,16 +106,16 @@ func FetchLatestVersionTag() (string, error) {
 
 func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	if onProgress != nil {
-		onProgress("⚡ Checking for updates from GitHub...")
+		onProgress("[NET] Checking for updates from GitHub...")
 	}
 
 	latestTag, err := FetchLatestVersionTag()
 	if err == nil && latestTag != "" {
 		if strings.EqualFold(latestTag, AppVersion) || latestTag <= AppVersion {
-			return fmt.Sprintf("✨ You are already on the latest version of TermChat (%s)!", AppVersion), nil
+			return fmt.Sprintf("[OK] You are already on the latest version of TermChat (%s)!", AppVersion), nil
 		}
 		if onProgress != nil {
-			onProgress(fmt.Sprintf("⚡ Found new version: %s (Current: %s)", latestTag, AppVersion))
+			onProgress(fmt.Sprintf("[NET] Found new version: %s (Current: %s)", latestTag, AppVersion))
 		}
 	} else {
 		latestTag = AppVersion
@@ -137,7 +137,7 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("request creation error: %w", err)
 	}
-	req.Header.Set("User-Agent", "TermChat-Updater/1.1")
+	req.Header.Set("User-Agent", "TermChat-Updater/1.2")
 
 	// No hard timeout during body streaming
 	client := &http.Client{Timeout: 0}
@@ -154,9 +154,9 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	totalSize := resp.ContentLength
 	if onProgress != nil {
 		if totalSize > 0 {
-			onProgress(fmt.Sprintf("⚡ Downloading TermChat update (%.1f MB)...", float64(totalSize)/(1024*1024)))
+			onProgress(fmt.Sprintf("[NET] Downloading TermChat update (%.1f MB)...", float64(totalSize)/(1024*1024)))
 		} else {
-			onProgress("⚡ Downloading TermChat update...")
+			onProgress("[NET] Downloading TermChat update...")
 		}
 	}
 
@@ -210,7 +210,7 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 		return "", fmt.Errorf("failed to replace binary at %s: %w", execPath, err)
 	}
 
-	return fmt.Sprintf("✅ Successfully updated TermChat to %s!\n💡 Please restart termchat to apply.", latestTag), nil
+	return fmt.Sprintf("[OK] Successfully updated TermChat to %s!\n:: Please restart termchat to apply.", latestTag), nil
 }
 
 func UpdateSelf() (string, error) {

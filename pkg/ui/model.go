@@ -314,6 +314,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.recalculateViewport()
 			return m, nil
 
+		case tea.KeyUp:
+			if m.textInput.Value() == "" {
+				m.viewport.LineUp(1)
+				return m, nil
+			}
+
+		case tea.KeyDown:
+			if m.textInput.Value() == "" {
+				m.viewport.LineDown(1)
+				return m, nil
+			}
+
 		case tea.KeyPgUp:
 			m.viewport.HalfViewUp()
 			return m, nil
@@ -479,8 +491,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.viewport.SetContent(m.renderMessages())
 
+	case tea.MouseMsg:
+		switch msg.Type {
+		case tea.MouseWheelUp:
+			m.viewport.LineUp(3)
+			return m, nil
+		case tea.MouseWheelDown:
+			m.viewport.LineDown(3)
+			return m, nil
+		}
+
 	case fileReceivedMsg:
-		notice := fmt.Sprintf("📥 Received '%s' (%s) from %s\n   📁 Saved to: %s", msg.fileName, network.FormatBytes(msg.size), msg.senderName, msg.savedPath)
+		notice := fmt.Sprintf("[RECV] Received '%s' (%s) from %s\n   [DIR] Saved to: %s", msg.fileName, network.FormatBytes(msg.size), msg.senderName, msg.savedPath)
 		m.messages = append(m.messages, ChatMessage{
 			SenderName: "SYSTEM",
 			Content:    notice,
@@ -503,11 +525,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textInput, tiCmd = m.textInput.Update(msg)
 	}
 
-	// Only forward non-KeyMsg events (like mouse wheel scroll or window resize) to viewport
-	// to prevent typing keys ('j', 'k', arrows) from accidentally scrolling the chat view
-	if _, isKey := msg.(tea.KeyMsg); !isKey {
-		m.viewport, vpCmd = m.viewport.Update(msg)
-	}
+	// Forward events to viewport
+	m.viewport, vpCmd = m.viewport.Update(msg)
 
 	cmds = append(cmds, tiCmd, vpCmd)
 	return m, tea.Batch(cmds...)

@@ -681,7 +681,7 @@ func (m *Manager) ConnectRelay(relayURL, roomName string) {
 			m.relayMu.Unlock()
 
 			if m.events.OnSystemMsg != nil {
-				m.events.OnSystemMsg(fmt.Sprintf("☁️ Connected to Cloud Room #%s (24/7 Global)", roomName))
+				m.events.OnSystemMsg(fmt.Sprintf("[ROOM] Connected to Cloud Room #%s (24/7 Global)", roomName))
 			}
 
 			// Keep-alive heartbeat pinger

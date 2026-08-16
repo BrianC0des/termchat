@@ -77,10 +77,11 @@ func main() {
 	// 2. Initialize TUI Model
 	model := ui.NewModel(mgr)
 
-	// 3. Create Bubble Tea Program (native mouse text selection enabled)
+	// 3. Create Bubble Tea Program (native mouse wheel & text selection enabled)
 	p := tea.NewProgram(
 		model,
 		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(),
 	)
 
 	// 4. Bind event bridge from Network Manager to Bubble Tea UI
