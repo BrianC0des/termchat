@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -154,6 +155,23 @@ func getStagedTagPath() string {
 	return filepath.Join(os.TempDir(), "termchat-staged-tag.txt")
 }
 
+func createOptimizedHTTPClient() *http.Client {
+	transport := &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   10 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:   true,
+		MaxIdleConns:        10,
+		IdleConnTimeout:     90 * time.Second,
+		TLSHandshakeTimeout: 5 * time.Second,
+		ReadBufferSize:      64 * 1024,
+		WriteBufferSize:     64 * 1024,
+	}
+	return &http.Client{Transport: transport, Timeout: 0}
+}
+
 func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 	go func() {
 		latestTag, err := FetchLatestVersionTag()
@@ -176,17 +194,37 @@ func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 		if runtime.GOOS == "windows" {
 			ext = ".zip"
 		}
-		downloadURL := fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s%s", binaryName, ext)
+		archiveName := binaryName + ext
 
-		req, err := http.NewRequest("GET", downloadURL, nil)
-		if err != nil {
-			return
+		// High-speed URLs: 1. High-speed Relay Proxy Mirror, 2. GitHub Release Asset
+		urls := []string{
+			fmt.Sprintf("https://termchat-o51d.onrender.com/api/update?file=%s", archiveName),
+			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", archiveName),
+			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", binaryName),
 		}
-		req.Header.Set("User-Agent", "TermChat-Updater/1.3")
 
-		client := &http.Client{Timeout: 30 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil || resp.StatusCode != http.StatusOK {
+		client := createOptimizedHTTPClient()
+		var resp *http.Response
+		var usedURL string
+
+		for _, u := range urls {
+			req, rErr := http.NewRequest("GET", u, nil)
+			if rErr != nil {
+				continue
+			}
+			req.Header.Set("User-Agent", "TermChat-Updater/1.3")
+			r, dErr := client.Do(req)
+			if dErr == nil && r.StatusCode == http.StatusOK {
+				resp = r
+				usedURL = u
+				break
+			}
+			if r != nil {
+				r.Body.Close()
+			}
+		}
+
+		if resp == nil {
 			return
 		}
 		defer resp.Body.Close()
@@ -202,9 +240,9 @@ func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 		}
 		defer stagedFile.Close()
 
-		if strings.HasSuffix(downloadURL, ".tar.gz") {
+		if strings.HasSuffix(usedURL, ".tar.gz") || strings.Contains(usedURL, ".tar.gz") {
 			err = extractTarGz(gzData, stagedFile)
-		} else if strings.HasSuffix(downloadURL, ".zip") {
+		} else if strings.HasSuffix(usedURL, ".zip") || strings.Contains(usedURL, ".zip") {
 			err = extractZip(gzData, stagedFile)
 		} else {
 			_, err = stagedFile.Write(gzData)
@@ -276,35 +314,41 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	}
 
 	binaryName := getPlatformBinaryName()
-	
-	// Prefer downloading compressed archive (.tar.gz / .zip) for 4x faster download (2.1 MB vs 8.4 MB)
 	ext := ".tar.gz"
 	if runtime.GOOS == "windows" {
 		ext = ".zip"
 	}
 	archiveName := binaryName + ext
-	downloadURL := fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", archiveName)
 
-	req, err := http.NewRequest("GET", downloadURL, nil)
-	if err != nil {
-		return "", fmt.Errorf("request creation error: %w", err)
+	urls := []string{
+		fmt.Sprintf("https://termchat-o51d.onrender.com/api/update?file=%s", archiveName),
+		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", archiveName),
+		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", binaryName),
 	}
-	req.Header.Set("User-Agent", "TermChat-Updater/1.3")
 
-	client := &http.Client{Timeout: 0}
-	resp, err := client.Do(req)
-	if err != nil || resp.StatusCode != http.StatusOK {
-		// Fallback to direct raw binary download if compressed archive isn't available
-		if resp != nil {
-			resp.Body.Close()
+	client := createOptimizedHTTPClient()
+	var resp *http.Response
+	var usedURL string
+
+	for _, u := range urls {
+		req, rErr := http.NewRequest("GET", u, nil)
+		if rErr != nil {
+			continue
 		}
-		downloadURL = fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", binaryName)
-		req, _ = http.NewRequest("GET", downloadURL, nil)
 		req.Header.Set("User-Agent", "TermChat-Updater/1.3")
-		resp, err = client.Do(req)
-		if err != nil || resp.StatusCode != http.StatusOK {
-			return "", fmt.Errorf("failed to download update asset")
+		r, dErr := client.Do(req)
+		if dErr == nil && r.StatusCode == http.StatusOK {
+			resp = r
+			usedURL = u
+			break
 		}
+		if r != nil {
+			r.Body.Close()
+		}
+	}
+
+	if resp == nil {
+		return "", fmt.Errorf("failed to download update from all available mirrors")
 	}
 	defer resp.Body.Close()
 
@@ -341,9 +385,9 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	}()
 
 	rawBytes := downloadedData.Bytes()
-	if strings.HasSuffix(downloadURL, ".tar.gz") {
+	if strings.HasSuffix(usedURL, ".tar.gz") || strings.Contains(usedURL, ".tar.gz") {
 		err = extractTarGz(rawBytes, tmpFile)
-	} else if strings.HasSuffix(downloadURL, ".zip") {
+	} else if strings.HasSuffix(usedURL, ".zip") || strings.Contains(usedURL, ".zip") {
 		err = extractZip(rawBytes, tmpFile)
 	} else {
 		_, err = tmpFile.Write(rawBytes)

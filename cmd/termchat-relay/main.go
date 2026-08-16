@@ -588,6 +588,40 @@ func main() {
 	http.HandleFunc("/ws", server.handleWS)
 	http.HandleFunc("/api/upload", server.handleUpload)
 	http.HandleFunc("/files/", server.handleDownload)
+	http.HandleFunc("/api/update", func(w http.ResponseWriter, r *http.Request) {
+		fileName := r.URL.Query().Get("file")
+		if fileName == "" {
+			http.Error(w, "missing file parameter", http.StatusBadRequest)
+			return
+		}
+		fileName = filepath.Base(fileName)
+		targetURL := fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", fileName)
+
+		req, err := http.NewRequest("GET", targetURL, nil)
+		if err != nil {
+			http.Error(w, "invalid request", http.StatusInternalServerError)
+			return
+		}
+		req.Header.Set("User-Agent", "TermChat-Relay-Mirror/1.3")
+
+		client := &http.Client{Timeout: 60 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			http.Error(w, "failed to fetch release asset from origin", http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+
+		w.Header().Set("Content-Type", "application/octet-stream")
+		if resp.ContentLength > 0 {
+			w.Header().Set("Content-Length", strconv.FormatInt(resp.ContentLength, 10))
+		}
+		buf := make([]byte, 64*1024)
+		_, _ = io.CopyBuffer(w, resp.Body, buf)
+	})
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		server.roomsMu.RLock()
 		totalRooms := len(server.rooms)
