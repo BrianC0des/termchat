@@ -168,7 +168,7 @@ func NewModel(mgr *network.Manager) *Model {
 		ApplyTheme(cfg.Theme)
 	}
 
-	return &Model{
+	m := &Model{
 		manager:             mgr,
 		messages:            initialMsgs,
 		transfers:           make(map[string]network.FileTransferProgress),
@@ -181,6 +181,13 @@ func NewModel(mgr *network.Manager) *Model {
 		userStatuses:        make(map[string]string),
 		pinnedMsgs:          make([]ChatMessage, 0),
 	}
+
+	// Pro Feature: Silent Background Pre-fetching of updates while user chats!
+	system.CheckAndPreFetchUpdateAsync(func(msg string) {
+		m.addSystemMsg(msg)
+	})
+
+	return m
 }
 
 func (m *Model) Init() tea.Cmd {

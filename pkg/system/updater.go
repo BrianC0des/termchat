@@ -146,6 +146,80 @@ func FetchLatestVersionTag() (string, error) {
 	return data.TagName, nil
 }
 
+func getStagedBinaryPath() string {
+	return filepath.Join(os.TempDir(), "termchat-staged-binary.tmp")
+}
+
+func getStagedTagPath() string {
+	return filepath.Join(os.TempDir(), "termchat-staged-tag.txt")
+}
+
+func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
+	go func() {
+		latestTag, err := FetchLatestVersionTag()
+		if err != nil || latestTag == "" || latestTag <= AppVersion {
+			return
+		}
+
+		stagedTag, _ := os.ReadFile(getStagedTagPath())
+		if strings.TrimSpace(string(stagedTag)) == latestTag {
+			if info, err := os.Stat(getStagedBinaryPath()); err == nil && info.Size() > 1000000 {
+				if onNotice != nil {
+					onNotice(fmt.Sprintf("[NET] New update %s is pre-downloaded & ready! Type `/update` to apply instantly.", latestTag))
+				}
+				return
+			}
+		}
+
+		binaryName := getPlatformBinaryName()
+		ext := ".tar.gz"
+		if runtime.GOOS == "windows" {
+			ext = ".zip"
+		}
+		downloadURL := fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s%s", binaryName, ext)
+
+		req, err := http.NewRequest("GET", downloadURL, nil)
+		if err != nil {
+			return
+		}
+		req.Header.Set("User-Agent", "TermChat-Updater/1.3")
+
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			return
+		}
+		defer resp.Body.Close()
+
+		gzData, err := io.ReadAll(resp.Body)
+		if err != nil || len(gzData) == 0 {
+			return
+		}
+
+		stagedFile, err := os.Create(getStagedBinaryPath())
+		if err != nil {
+			return
+		}
+		defer stagedFile.Close()
+
+		if strings.HasSuffix(downloadURL, ".tar.gz") {
+			err = extractTarGz(gzData, stagedFile)
+		} else if strings.HasSuffix(downloadURL, ".zip") {
+			err = extractZip(gzData, stagedFile)
+		} else {
+			_, err = stagedFile.Write(gzData)
+		}
+
+		if err == nil {
+			_ = os.Chmod(getStagedBinaryPath(), 0755)
+			_ = os.WriteFile(getStagedTagPath(), []byte(latestTag), 0644)
+			if onNotice != nil {
+				onNotice(fmt.Sprintf("[NET] New update %s pre-downloaded! Type `/update` to apply instantly.", latestTag))
+			}
+		}
+	}()
+}
+
 func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	if onProgress != nil {
 		onProgress("[NET] Checking for updates from GitHub...")
@@ -163,6 +237,44 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 		latestTag = AppVersion
 	}
 
+	execPath, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("could not determine executable path: %w", err)
+	}
+	execPath, err = filepath.EvalSymlinks(execPath)
+	if err != nil {
+		return "", fmt.Errorf("could not resolve symlinks: %w", err)
+	}
+
+	// Check if update is ALREADY pre-fetched in background
+	stagedTag, _ := os.ReadFile(getStagedTagPath())
+	if strings.TrimSpace(string(stagedTag)) == latestTag {
+		stagedBin := getStagedBinaryPath()
+		if info, sErr := os.Stat(stagedBin); sErr == nil && info.Size() > 1000000 {
+			if onProgress != nil {
+				onProgress("[OK] Applying pre-downloaded update instantly (0s wait)...")
+			}
+			if runtime.GOOS == "windows" {
+				oldPath := execPath + ".old"
+				_ = os.Remove(oldPath)
+				_ = os.Rename(execPath, oldPath)
+			}
+			rErr := os.Rename(stagedBin, execPath)
+			if rErr != nil {
+				src, _ := os.Open(stagedBin)
+				dst, _ := os.OpenFile(execPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+				if src != nil && dst != nil {
+					_, _ = io.Copy(dst, src)
+					_ = dst.Close()
+					_ = src.Close()
+				}
+			}
+			_ = os.Remove(getStagedTagPath())
+			_ = os.Remove(stagedBin)
+			return fmt.Sprintf("[OK] Instant update applied! TermChat updated to %s.\n:: Please restart termchat to run new version.", latestTag), nil
+		}
+	}
+
 	binaryName := getPlatformBinaryName()
 	
 	// Prefer downloading compressed archive (.tar.gz / .zip) for 4x faster download (2.1 MB vs 8.4 MB)
@@ -172,15 +284,6 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	}
 	archiveName := binaryName + ext
 	downloadURL := fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", archiveName)
-
-	execPath, err := os.Executable()
-	if err != nil {
-		return "", fmt.Errorf("could not determine executable path: %w", err)
-	}
-	execPath, err = filepath.EvalSymlinks(execPath)
-	if err != nil {
-		return "", fmt.Errorf("could not resolve symlinks: %w", err)
-	}
 
 	req, err := http.NewRequest("GET", downloadURL, nil)
 	if err != nil {
