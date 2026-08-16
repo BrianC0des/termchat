@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +26,15 @@ type ChatMessage struct {
 	IsFile     bool
 }
 
+type SharedFileItem struct {
+	Index    int
+	FileName string
+	SizeStr  string
+	URL      string
+	Sender   string
+	Time     time.Time
+}
+
 type Model struct {
 	manager       *network.Manager
 	messages      []ChatMessage
@@ -40,6 +50,10 @@ type Model struct {
 	qrContent           string
 	showMembersDropdown bool
 	peerBatteries       map[string]system.BatteryInfo
+
+	sharedFiles     []SharedFileItem
+	showFilesModal  bool
+	selectedFileIdx int
 }
 
 // Custom Tea Messages
@@ -174,6 +188,49 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Modal controls when Room Files Vault is open
+		if m.showFilesModal {
+			switch msg.Type {
+			case tea.KeyEsc, tea.KeyCtrlC, tea.KeyCtrlF:
+				m.showFilesModal = false
+				return m, nil
+			case tea.KeyUp:
+				if m.selectedFileIdx > 0 {
+					m.selectedFileIdx--
+				}
+				return m, nil
+			case tea.KeyDown:
+				if m.selectedFileIdx < len(m.sharedFiles)-1 {
+					m.selectedFileIdx++
+				}
+				return m, nil
+			case tea.KeyEnter:
+				if len(m.sharedFiles) > 0 && m.selectedFileIdx >= 0 && m.selectedFileIdx < len(m.sharedFiles) {
+					item := m.sharedFiles[m.selectedFileIdx]
+					m.showFilesModal = false
+					m.addSystemMsg(fmt.Sprintf("📥 Downloading '%s'...", item.FileName))
+					go func(url string) {
+						savedPath, err := m.manager.DownloadFileFromURL(url)
+						if err != nil {
+							m.addSystemMsg(fmt.Sprintf("❌ Download failed: %v", err))
+						} else {
+							m.addSystemMsg(fmt.Sprintf("✅ Download complete! Saved to:\n   📁 %s", savedPath))
+						}
+					}(item.URL)
+				}
+				return m, nil
+			case tea.KeyRunes:
+				if msg.String() == "o" || msg.String() == "O" {
+					if len(m.sharedFiles) > 0 && m.selectedFileIdx >= 0 && m.selectedFileIdx < len(m.sharedFiles) {
+						_ = system.OpenURL(m.sharedFiles[m.selectedFileIdx].URL)
+						m.addSystemMsg("🌐 Opened in browser: " + m.sharedFiles[m.selectedFileIdx].URL)
+					}
+					return m, nil
+				}
+			}
+			return m, nil
+		}
+
 		// Modal controls when QR is open
 		if m.showQR {
 			if msg.Type == tea.KeyEsc || msg.Type == tea.KeyEnter || msg.Type == tea.KeyCtrlC {
@@ -201,6 +258,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case tea.KeyF2:
 			m.showMembersDropdown = !m.showMembersDropdown
+			return m, nil
+
+		case tea.KeyCtrlF:
+			m.refreshSharedFiles()
+			m.showFilesModal = !m.showFilesModal
 			return m, nil
 
 		case tea.KeyCtrlO:
@@ -636,21 +698,43 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		m.manager.SetEncryptionPassphrase(pass)
 		m.addSystemMsg("🔒 AES-256 End-to-End Encryption enabled!")
 
+	case "/files", "/shared", "/vault", "/downloads":
+		m.refreshSharedFiles()
+		if len(m.sharedFiles) == 0 {
+			m.addSystemMsg("📁 No shared files in this room yet. Press `Ctrl + O` or type `/send <path>` to share a file!")
+		} else {
+			m.showFilesModal = true
+		}
+
 	case "/get", "/download", "/dl", "/fetch":
 		if len(parts) < 2 {
-			m.addSystemMsg("Usage: /get <file_url>\nExample: /get https://termchat-o51d.onrender.com/files/abc123/file.zip")
+			m.addSystemMsg("Usage: /get <file_number_or_url>\nExamples:\n  • /get 1  (download file #1 from room list)\n  • /get https://termchat-o51d.onrender.com/files/...")
 			return
 		}
-		fileURL := parts[1]
+		target := parts[1]
+		fileURL := target
+
+		// Check if user passed a file index number like `/get 1`
+		m.refreshSharedFiles()
+		if num, err := strconv.Atoi(target); err == nil {
+			if num >= 1 && num <= len(m.sharedFiles) {
+				fileURL = m.sharedFiles[num-1].URL
+				m.addSystemMsg(fmt.Sprintf("📥 Selected file #%d: '%s'", num, m.sharedFiles[num-1].FileName))
+			} else {
+				m.addSystemMsg(fmt.Sprintf("❌ Invalid file number #%d. Room has %d shared files. Press Ctrl+F to browse.", num, len(m.sharedFiles)))
+				return
+			}
+		}
+
 		m.addSystemMsg(fmt.Sprintf("📥 Downloading file from %s...", fileURL))
-		go func() {
-			savedPath, err := m.manager.DownloadFileFromURL(fileURL)
+		go func(url string) {
+			savedPath, err := m.manager.DownloadFileFromURL(url)
 			if err != nil {
 				m.addSystemMsg(fmt.Sprintf("❌ Download failed: %v", err))
 			} else {
 				m.addSystemMsg(fmt.Sprintf("✅ Download complete! Saved to:\n   📁 %s", savedPath))
 			}
-		}()
+		}(fileURL)
 
 	case "/qr":
 		ips := network.GetLocalIPs()
@@ -1068,3 +1152,40 @@ func SetupEventBridge(p *tea.Program) network.NetworkEvents {
 		},
 	}
 }
+
+func (m *Model) refreshSharedFiles() {
+	var list []SharedFileItem
+	idx := 1
+	for _, msg := range m.messages {
+		if strings.Contains(msg.Content, "📦 Shared file:") && strings.Contains(msg.Content, "🔗 http") {
+			lines := strings.Split(msg.Content, "\n")
+			fileName := "Shared File"
+			fileURL := ""
+			for _, l := range lines {
+				if strings.HasPrefix(l, "📦 Shared file:") {
+					fileName = strings.TrimSpace(strings.TrimPrefix(l, "📦 Shared file:"))
+				} else if strings.HasPrefix(l, "🔗 ") {
+					fileURL = strings.TrimSpace(strings.TrimPrefix(l, "🔗 "))
+				}
+			}
+			if fileURL != "" {
+				list = append(list, SharedFileItem{
+					Index:    idx,
+					FileName: fileName,
+					URL:      fileURL,
+					Sender:   msg.SenderName,
+					Time:     msg.Timestamp,
+				})
+				idx++
+			}
+		}
+	}
+	m.sharedFiles = list
+	if m.selectedFileIdx >= len(m.sharedFiles) {
+		m.selectedFileIdx = len(m.sharedFiles) - 1
+	}
+	if m.selectedFileIdx < 0 {
+		m.selectedFileIdx = 0
+	}
+}
+

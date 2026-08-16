@@ -19,6 +19,10 @@ func (m *Model) View() string {
 		return m.filePicker.View(m.width, m.height)
 	}
 
+	if m.showFilesModal {
+		return m.renderFilesModal()
+	}
+
 	if m.showQR {
 		return m.renderQRView()
 	}
@@ -217,7 +221,7 @@ func (m *Model) renderSidebar(peers []network.PeerConnection) string {
 	sb.WriteString("\n")
 	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7AA2F7")).Render("QUICK ACTIONS"))
 	sb.WriteString("\n")
-	sb.WriteString(fmt.Sprintf("%s /clip\n%s /browse\n%s /battery\n%s /ring\n%s /qr",
+	sb.WriteString(fmt.Sprintf("%s /files [Ctrl+F]\n%s /browse [Ctrl+O]\n%s /clip\n%s /battery\n%s /qr",
 		HelpKeyStyle.Render("•"),
 		HelpKeyStyle.Render("•"),
 		HelpKeyStyle.Render("•"),
@@ -320,6 +324,54 @@ func (m *Model) renderQRView() string {
 	)
 }
 
+func (m *Model) renderFilesModal() string {
+	boxWidth := min(m.width-4, 70)
+	filesBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(PrimaryColor).
+		Padding(1, 2).
+		Width(boxWidth)
+
+	var sb strings.Builder
+	title := TitleStyle.Render("📁 ROOM SHARED FILES")
+	sb.WriteString(fmt.Sprintf("%s (Total: %d)\n", title, len(m.sharedFiles)))
+	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Render("Use ↑/↓ to select, [Enter] to download, [O] open in browser\n\n"))
+
+	if len(m.sharedFiles) == 0 {
+		sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#7AA2F7")).Render("No files shared in this room yet.\nPress Ctrl+O or type `/send <path>` to share a file!\n\n"))
+	} else {
+		for i, f := range m.sharedFiles {
+			cursor := "  "
+			itemStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#C0CAF5"))
+			if i == m.selectedFileIdx {
+				cursor = "❯ "
+				itemStyle = lipgloss.NewStyle().
+					Bold(true).
+					Foreground(lipgloss.Color("#7AA2F7")).
+					Background(lipgloss.Color("#24283B"))
+			}
+
+			senderStr := lipgloss.NewStyle().Foreground(lipgloss.Color("#E0AF68")).Render(fmt.Sprintf("by %s", f.Sender))
+			timeStr := lipgloss.NewStyle().Foreground(lipgloss.Color("#565F89")).Render(f.Time.Format("15:04"))
+
+			line := fmt.Sprintf("%s#%d  %-25s  %s  %s", cursor, f.Index, f.FileName, senderStr, timeStr)
+			sb.WriteString(itemStyle.Render(line))
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(lipgloss.NewStyle().Foreground(SecondaryColor).Render("[Enter] Download to ~/Downloads    [O] Open Link    [Esc] Close"))
+
+	return lipgloss.Place(
+		m.width,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		filesBox.Render(sb.String()),
+	)
+}
+
 func renderProgressBar(pct, width int) string {
 	if width < 5 {
 		width = 5
@@ -336,3 +388,4 @@ func renderProgressBar(pct, width int) string {
 	return lipgloss.NewStyle().Foreground(SecondaryColor).Render(filled) +
 		lipgloss.NewStyle().Foreground(lipgloss.Color("#3B4261")).Render(empty)
 }
+
