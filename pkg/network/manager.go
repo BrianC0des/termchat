@@ -370,6 +370,8 @@ func (m *Manager) readLoop(p *PeerConnection) {
 }
 
 func (m *Manager) handlePacket(p *PeerConnection, pkt *Packet) {
+	outerRoom := pkt.Room
+
 	// Handle encrypted wrapper packet
 	if pkt.Type == MsgTypeEncrypted {
 		if m.EncryptionKey == nil {
@@ -387,20 +389,26 @@ func (m *Manager) handlePacket(p *PeerConnection, pkt *Packet) {
 		}
 		var innerPkt Packet
 		if err := json.Unmarshal([]byte(decryptedJSON), &innerPkt); err == nil {
+			if innerPkt.Room == "" && outerRoom != "" {
+				innerPkt.Room = outerRoom
+			}
 			pkt = &innerPkt
 		}
 	}
 
 	// Strict Room isolation filter:
 	// If packet is from direct LAN:
-	// - If we are in a Cloud Room (m.RoomName != ""): ignore LAN traffic so LAN devices don't leak into private room!
+	// - If we are in a Cloud Room (m.RoomName != ""): accept if packet matches our room or has no room set on same LAN
 	// - If we are in LAN mode (m.RoomName == ""): ignore private cloud room traffic.
 	if p.RemoteIP != "cloud-relay" && p.RemoteIP != "Cloud" {
-		if m.RoomName != "" && pkt.Room != m.RoomName && pkt.Type != MsgTypeHandshake && pkt.Type != MsgTypePing && pkt.Type != MsgTypePong {
-			return
-		}
-		if m.RoomName == "" && pkt.Room != "" && pkt.Type != MsgTypeHandshake && pkt.Type != MsgTypePing && pkt.Type != MsgTypePong {
-			return
+		if m.RoomName != "" {
+			if pkt.Room != "" && pkt.Room != m.RoomName && pkt.Type != MsgTypeHandshake && pkt.Type != MsgTypePing && pkt.Type != MsgTypePong {
+				return
+			}
+		} else {
+			if pkt.Room != "" && pkt.Type != MsgTypeHandshake && pkt.Type != MsgTypePing && pkt.Type != MsgTypePong {
+				return
+			}
 		}
 	}
 
@@ -812,21 +820,21 @@ func (m *Manager) SendPacket(p *Packet) error {
 		return err
 	}
 
-	// 1. If in Cloud Room mode: send ONLY to Cloud Relay
+	// 1. If in Cloud Room mode: broadcast to Cloud Relay
 	if m.RoomName != "" {
 		m.relayMu.Lock()
 		if m.relayConn != nil {
 			_ = m.relayConn.WriteMessage(websocket.TextMessage, data)
 		}
 		m.relayMu.Unlock()
-	} else {
-		// 2. If in pure Offline LAN mode: send ONLY to direct LAN peers
-		m.peersMu.RLock()
-		for _, peer := range m.peers {
-			_ = m.sendToPeer(peer, p)
-		}
-		m.peersMu.RUnlock()
 	}
+
+	// 2. Also broadcast to direct LAN peers
+	m.peersMu.RLock()
+	for _, peer := range m.peers {
+		_ = m.sendToPeer(peer, p)
+	}
+	m.peersMu.RUnlock()
 
 	return nil
 }
@@ -834,6 +842,7 @@ func (m *Manager) SendPacket(p *Packet) error {
 func (m *Manager) SendChat(text string) error {
 	p := &Packet{
 		Type:      MsgTypeChat,
+		Room:      m.RoomName,
 		SenderID:  m.LocalID,
 		Sender:    m.LocalName,
 		Timestamp: time.Now(),
@@ -847,6 +856,7 @@ func (m *Manager) SendChat(text string) error {
 		if err == nil {
 			p = &Packet{
 				Type:      MsgTypeEncrypted,
+				Room:      m.RoomName,
 				SenderID:  m.LocalID,
 				Sender:    m.LocalName,
 				Timestamp: time.Now(),
@@ -1385,6 +1395,7 @@ func FormatBytes(b int64) string {
 func (m *Manager) SendReply(replyToNum int, replyToSender, replyToText, content string) error {
 	p := &Packet{
 		Type:          MsgTypeChat,
+		Room:          m.RoomName,
 		SenderID:      m.LocalID,
 		Sender:        m.LocalName,
 		Timestamp:     time.Now(),
@@ -1400,6 +1411,7 @@ func (m *Manager) SendReply(replyToNum int, replyToSender, replyToText, content 
 		if err == nil {
 			p = &Packet{
 				Type:          MsgTypeEncrypted,
+				Room:          m.RoomName,
 				SenderID:      m.LocalID,
 				Sender:        m.LocalName,
 				Timestamp:     time.Now(),
