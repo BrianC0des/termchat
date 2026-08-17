@@ -404,21 +404,41 @@ func (m *Manager) handlePacket(p *PeerConnection, pkt *Packet) {
 		}
 	}
 
+	// Auto-register peer in cloudPeers whenever any packet is received from them
+	if m.RoomName != "" && pkt.SenderID != "" && pkt.Sender != "" && pkt.SenderID != m.LocalID {
+		m.cloudPeersMu.Lock()
+		m.cloudPeers[pkt.SenderID] = &PeerConnection{
+			ID:       pkt.SenderID,
+			Name:     pkt.Sender,
+			RemoteIP: "Cloud",
+		}
+		m.cloudPeersMu.Unlock()
+	}
+
 	switch pkt.Type {
 	case MsgTypeHandshake:
 		if pkt.SenderID == m.LocalID {
-			_ = p.Conn.Close()
+			if p.Conn != nil {
+				_ = p.Conn.Close()
+			}
 			return
 		}
 
 		p.ID = pkt.SenderID
 		p.Name = pkt.Sender
-		m.peersMu.Lock()
-		if old, exists := m.peers[p.ID]; exists && old != p {
-			_ = old.Conn.Close()
+
+		if m.RoomName != "" {
+			m.cloudPeersMu.Lock()
+			m.cloudPeers[p.ID] = p
+			m.cloudPeersMu.Unlock()
+		} else {
+			m.peersMu.Lock()
+			if old, exists := m.peers[p.ID]; exists && old != p {
+				_ = old.Conn.Close()
+			}
+			m.peers[p.ID] = p
+			m.peersMu.Unlock()
 		}
-		m.peers[p.ID] = p
-		m.peersMu.Unlock()
 
 		if m.events.OnPeerJoin != nil {
 			m.events.OnPeerJoin(p.ID, p.Name, p.RemoteIP)
@@ -659,6 +679,14 @@ func (m *Manager) ConnectRelay(relayURL, roomName string) {
 			if m.events.OnSystemMsg != nil {
 				m.events.OnSystemMsg(fmt.Sprintf("[ROOM] Connected to Cloud Room #%s (24/7 Global)", roomName))
 			}
+
+			// Broadcast presence to all room peers
+			_ = m.SendPacket(&Packet{
+				Type:      MsgTypeHandshake,
+				SenderID:  m.LocalID,
+				Sender:    m.LocalName,
+				Timestamp: time.Now(),
+			})
 
 			// Keep-alive heartbeat pinger
 			stopHeartbeat := make(chan struct{})

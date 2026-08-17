@@ -68,6 +68,7 @@ type Model struct {
 	roomExpiry    time.Time
 	hasRoomExpiry bool
 	autoDeleteTTL time.Duration
+	updateStatus  string
 }
 
 type SidebarMode int
@@ -79,6 +80,8 @@ const (
 )
 
 // Custom Tea Messages
+type updateProgressMsg string
+
 type incomingMsg struct {
 	senderID      string
 	senderName    string
@@ -453,6 +456,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.viewport.SetContent(m.renderMessages())
 			}
 		}
+
+	case updateProgressMsg:
+		m.updateStatus = string(msg)
+		return m, nil
 
 	case incomingMsg:
 		var expiresAt time.Time
@@ -1123,14 +1130,21 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		m.addSystemMsg(fmt.Sprintf("[AUDIO] Sent media command: %s", action))
 
 	case "/update", "/upgrade":
+		m.updateStatus = "⚡ [UPDATE] Checking for updates..."
 		go func() {
 			msg, err := system.UpdateSelfWithProgress(func(progressMsg string) {
-				m.addSystemMsg(progressMsg)
+				if activeProgram != nil {
+					activeProgram.Send(updateProgressMsg(progressMsg))
+				}
 			})
 			if err != nil {
-				m.addSystemMsg(fmt.Sprintf("[ERR] Update failed: %v", err))
+				if activeProgram != nil {
+					activeProgram.Send(updateProgressMsg(fmt.Sprintf("[ERR] %v", err)))
+				}
 			} else {
-				m.addSystemMsg(msg)
+				if activeProgram != nil {
+					activeProgram.Send(updateProgressMsg(msg))
+				}
 			}
 		}()
 
@@ -1142,8 +1156,8 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		}
 		pass := parts[1]
 		m.manager.SetEncryptionPassphrase(pass)
-		fingerprint := system.GenerateEmojiFingerprint(m.manager.EncryptionKey)
-		m.addSystemMsg(fmt.Sprintf("[AES-256] End-to-End Encryption enabled! Key Fingerprint: [ %s ]", fingerprint))
+		fingerprint := system.GenerateKeyFingerprint(m.manager.EncryptionKey)
+		m.addSystemMsg(fmt.Sprintf("[AES-256] End-to-End Encryption enabled! Verification Key Code: [ %s ]", fingerprint))
 
 	case "/expire", "/ttl":
 		if len(parts) < 2 {
@@ -1603,7 +1617,10 @@ func (m *Model) renderMessages() string {
 	return sb.String()
 }
 
+var activeProgram *tea.Program
+
 func SetupEventBridge(p *tea.Program) network.NetworkEvents {
+	activeProgram = p
 	return network.NetworkEvents{
 		OnMessage: func(senderID, senderName, text string, ts time.Time, replyNum int, replySender, replyText string) {
 			p.Send(incomingMsg{
@@ -1710,8 +1727,12 @@ func (m *Model) recalculateViewport() {
 	if len(m.transfers) > 0 {
 		transferHeight = 2
 	}
+	updateHeight := 0
+	if m.updateStatus != "" {
+		updateHeight = 1
+	}
 
-	vpHeight := m.height - headerHeight - inputHeight - transferHeight - 2
+	vpHeight := m.height - headerHeight - inputHeight - transferHeight - updateHeight - 2
 	if vpHeight < 4 {
 		vpHeight = 4
 	}

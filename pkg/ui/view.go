@@ -61,11 +61,11 @@ func (m *Model) View() string {
 		}
 	}
 
-	// Encryption status badge with Telegram-style 4-emoji verification hash
+	// Encryption status badge with verification security code (e.g. 7F2A-9C4B)
 	var lockBadge string
 	if m.manager.EncryptionKey != nil {
-		emojiHash := system.GenerateEmojiFingerprint(m.manager.EncryptionKey)
-		lockBadge = lipgloss.NewStyle().Foreground(AccentColor).Bold(true).Render(fmt.Sprintf(" [AES-256: %s]", emojiHash))
+		keyCode := system.GenerateKeyFingerprint(m.manager.EncryptionKey)
+		lockBadge = lipgloss.NewStyle().Foreground(AccentColor).Bold(true).Render(fmt.Sprintf(" [AES-256: %s]", keyCode))
 	}
 
 	// Room TTL countdown pill
@@ -217,10 +217,24 @@ func (m *Model) View() string {
 		Padding(0, 1).
 		Render(inputRow)
 
+	var updateBanner string
+	if m.updateStatus != "" {
+		updateBanner = lipgloss.NewStyle().
+			Foreground(AccentColor).
+			Background(BgLight).
+			Bold(true).
+			Padding(0, 1).
+			Width(m.width).
+			Render(m.updateStatus)
+	}
+
 	var layout []string
 	layout = append(layout, headerBar, body)
 	if transferBar != "" {
 		layout = append(layout, transferBar)
+	}
+	if updateBanner != "" {
+		layout = append(layout, updateBanner)
 	}
 	layout = append(layout, styledInput)
 
