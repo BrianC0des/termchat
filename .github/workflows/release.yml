@@ -1,4 +1,4 @@
-name: Release TermChat
+name: Release
 
 on:
   push:
@@ -9,8 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build & Release Cross-Platform Binaries
+  build-and-release:
+    name: Build & Publish Release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
@@ -19,105 +19,51 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22'
+          go-version: '1.23'
+          cache: true
 
-      - name: Install zstd & UPX
-        run: sudo apt-get update && sudo apt-get install -y zstd upx
+      - name: Install Build Tools (zstd, zip, upx)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zstd zip upx
 
-      - name: Build & Compress All Binaries
+      - name: Compile 4 Core Platforms
         run: |
           mkdir -p dist
-          
-          # Linux
+
+          echo "[1/4] Compiling Linux PC (amd64)..."
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dist/termchat-linux-amd64 .
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o dist/termchat-linux-arm64 .
-          
-          # Windows
-          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o dist/termchat-windows.exe .
-          CGO_ENABLED=0 GOOS=windows GOARCH=arm64 go build -ldflags="-s -w" -o dist/termchat-windows-arm64.exe .
-          
-          # macOS
-          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o dist/termchat-mac-apple-silicon .
-          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o dist/termchat-mac-intel .
-          
-          # Android / Termux
-          CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -ldflags="-s -w" -o dist/termchat-android-arm64 .
-          CGO_ENABLED=0 GOOS=linux GOARCH=arm go build -ldflags="-s -w" -o dist/termchat-android-arm .
-
-          # Apply UPX compression to Linux binaries (skip Windows Go PE to avoid header corruption)
           upx --best --lzma dist/termchat-linux-amd64 || true
-          upx --best --lzma dist/termchat-android-arm || true
+          tar --zstd -cvf dist/termchat-linux-amd64.tar.zst -C dist termchat-linux-amd64
 
-          # Create Pacman-style Zstandard compressed archives (.tar.zst) & Gzip (.tar.gz)
+          echo "[2/4] Compiling Windows 64-bit (amd64)..."
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o dist/termchat-windows.exe .
+          zip -j dist/termchat-windows.zip dist/termchat-windows.exe
+
+          echo "[3/4] Compiling Android Termux (arm64)..."
+          CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -ldflags="-s -w" -o dist/termchat-android-arm64 .
+          tar --zstd -cvf dist/termchat-android-arm64.tar.zst -C dist termchat-android-arm64
+
+          echo "[4/4] Compiling macOS Apple Silicon (arm64)..."
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o dist/termchat-mac-apple-silicon .
+          tar --zstd -cvf dist/termchat-mac-apple-silicon.tar.zst -C dist termchat-mac-apple-silicon
+
+          echo "[CHECKSUMS] Generating SHA256 checksums..."
           cd dist
-          tar --zstd -cvf termchat-linux-amd64.tar.zst termchat-linux-amd64
-          tar --zstd -cvf termchat-linux-arm64.tar.zst termchat-linux-arm64
-          tar --zstd -cvf termchat-mac-apple-silicon.tar.zst termchat-mac-apple-silicon
-          tar --zstd -cvf termchat-mac-intel.tar.zst termchat-mac-intel
-          tar --zstd -cvf termchat-android-arm64.tar.zst termchat-android-arm64
-          tar --zstd -cvf termchat-android-arm.tar.zst termchat-android-arm
-          tar -czvf termchat-linux-amd64.tar.gz termchat-linux-amd64
-          tar -czvf termchat-linux-arm64.tar.gz termchat-linux-arm64
-          tar -czvf termchat-mac-apple-silicon.tar.gz termchat-mac-apple-silicon
-          tar -czvf termchat-mac-intel.tar.gz termchat-mac-intel
-          tar -czvf termchat-android-arm64.tar.gz termchat-android-arm64
-          tar -czvf termchat-android-arm.tar.gz termchat-android-arm
-          zip termchat-windows.zip termchat-windows.exe
-          zip termchat-windows-arm64.zip termchat-windows-arm64.exe
-          sha256sum * > checksums.txt
+          sha256sum termchat-linux-amd64.tar.zst termchat-windows.zip termchat-android-arm64.tar.zst termchat-mac-apple-silicon.tar.zst > checksums.txt
+          cd ..
 
-      - name: Publish GitHub Release
+          ls -lh dist/
+
+      - name: Create GitHub Release & Upload Assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/*.tar.zst
-            dist/*.tar.gz
-            dist/*.zip
+            dist/termchat-linux-amd64.tar.zst
+            dist/termchat-windows.zip
+            dist/termchat-android-arm64.tar.zst
+            dist/termchat-mac-apple-silicon.tar.zst
             dist/checksums.txt
-            dist/termchat-linux-amd64
-            dist/termchat-linux-arm64
-            dist/termchat-windows.exe
-            dist/termchat-windows-arm64.exe
-            dist/termchat-mac-apple-silicon
-            dist/termchat-mac-intel
-            dist/termchat-android-arm64
-            dist/termchat-android-arm
           generate_release_notes: true
-
-      - name: Deploy to Fastly Edge CDN (binaries branch)
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_branch: binaries
-          publish_dir: ./dist
-          keep_files: false
-          force_orphan: true
-
-      - name: Sync to Hugging Face Cloudflare Global CDN
-        if: ${{ env.HF_TOKEN != '' }}
         env:
-          HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: |
-          pip install --upgrade huggingface_hub
-          python3 -c "
-          import os
-          from huggingface_hub import HfApi
-          token = os.environ.get('HF_TOKEN')
-          if token:
-              api = HfApi(token=token)
-              user_info = api.whoami()
-              username = user_info.get('name', 'devchan123')
-              repo_id = f'{username}/termchat-releases'
-              print(f'Syncing to Hugging Face repo: {repo_id}')
-              try:
-                  api.create_repo(repo_id=repo_id, repo_type='dataset', private=False, exist_ok=True)
-              except Exception as e:
-                  print(f'HF Repo check: {e}')
-              api.upload_folder(
-                  folder_path='dist',
-                  repo_id=repo_id,
-                  repo_type='dataset'
-              )
-              print(f'Successfully published to https://huggingface.co/datasets/{repo_id}!')
-          "
-
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
