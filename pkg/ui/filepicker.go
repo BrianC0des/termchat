@@ -129,6 +129,46 @@ func (fp *FilePicker) Select() (selectedFile string, isSelected bool) {
 	return item.Path, true
 }
 
+func GetFileIcon(name string, isDir bool) string {
+	if isDir {
+		if name == ".." {
+			return "📁 ⮤ "
+		}
+		return "📁 "
+	}
+	ext := strings.ToLower(filepath.Ext(name))
+	switch ext {
+	case ".go":
+		return "🐹 "
+	case ".py":
+		return "🐍 "
+	case ".rs":
+		return "🦀 "
+	case ".js", ".ts", ".jsx", ".tsx":
+		return "📜 "
+	case ".c", ".cpp", ".h", ".hpp":
+		return "⚙️ "
+	case ".html", ".css", ".json", ".yaml", ".yml", ".toml", ".xml":
+		return "🌐 "
+	case ".sh", ".bash", ".zsh", ".fish":
+		return "💻 "
+	case ".sql", ".db", ".sqlite":
+		return "🗃️ "
+	case ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".ico":
+		return "🖼️ "
+	case ".zip", ".tar", ".zst", ".gz", ".7z", ".rar", ".bz2":
+		return "📦 "
+	case ".mp3", ".wav", ".flac", ".ogg", ".m4a":
+		return "🎵 "
+	case ".mp4", ".mkv", ".webm", ".avi", ".mov":
+		return "🎬 "
+	case ".pdf", ".md", ".txt", ".doc", ".docx":
+		return "📝 "
+	default:
+		return "📄 "
+	}
+}
+
 func (fp *FilePicker) View(width, height int) string {
 	if !fp.Active {
 		return ""
@@ -154,28 +194,11 @@ func (fp *FilePicker) View(width, height int) string {
 
 	for i := startIdx; i < endIdx; i++ {
 		item := fp.Items[i]
-		icon := "[FILE] "
-		if item.IsDir {
-			icon = "[DIR]  "
-		} else {
-			ext := strings.ToLower(filepath.Ext(item.Name))
-			switch ext {
-			case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg":
-				icon = "[IMG]  "
-			case ".zip", ".tar", ".gz", ".7z", ".apk":
-				icon = "[ZIP]  "
-			case ".mp3", ".wav", ".flac", ".ogg":
-				icon = "[AUD]  "
-			case ".mp4", ".mkv", ".webm", ".avi":
-				icon = "[VID]  "
-			case ".pdf", ".doc", ".docx", ".txt", ".md":
-				icon = "[DOC]  "
-			}
-		}
+		icon := GetFileIcon(item.Name, item.IsDir)
 
 		nameStr := item.Name
-		if len(nameStr) > 38 {
-			nameStr = nameStr[:35] + "..."
+		if len(nameStr) > 36 {
+			nameStr = nameStr[:33] + "..."
 		}
 
 		sizeStr := ""

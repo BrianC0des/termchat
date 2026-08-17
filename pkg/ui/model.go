@@ -104,6 +104,9 @@ type Model struct {
 	pastedSnippets   map[string]string
 	pasteCounter     int
 	expandCodeBlocks bool
+
+	toastMsg     string
+	toastExpires time.Time
 }
 
 type SidebarMode int
@@ -116,6 +119,50 @@ const (
 
 // Custom Tea Messages
 type updateProgressMsg string
+
+type editorFinishedMsg struct {
+	err      error
+	content  string
+	filePath string
+}
+
+func openEditorCmd() tea.Cmd {
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		editor = os.Getenv("VISUAL")
+	}
+	if editor == "" {
+		if _, err := exec.LookPath("nvim"); err == nil {
+			editor = "nvim"
+		} else if _, err := exec.LookPath("nano"); err == nil {
+			editor = "nano"
+		} else if _, err := exec.LookPath("vim"); err == nil {
+			editor = "vim"
+		} else if _, err := exec.LookPath("micro"); err == nil {
+			editor = "micro"
+		} else if _, err := exec.LookPath("vi"); err == nil {
+			editor = "vi"
+		} else {
+			editor = "nano"
+		}
+	}
+
+	tmpFile, err := os.CreateTemp("", "termchat-compose-*.md")
+	if err != nil {
+		return func() tea.Msg { return editorFinishedMsg{err: err} }
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+
+	c := exec.Command(editor, tmpPath)
+	return tea.ExecProcess(c, func(err error) tea.Msg {
+		if err != nil {
+			return editorFinishedMsg{err: err, filePath: tmpPath}
+		}
+		data, readErr := os.ReadFile(tmpPath)
+		return editorFinishedMsg{err: readErr, content: string(data), filePath: tmpPath}
+	})
+}
 
 type incomingMsg struct {
 	senderID      string
@@ -434,6 +481,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.SetContent(m.renderMessages())
 			return m, nil
 
+		case tea.KeyCtrlX:
+			return m, openEditorCmd()
+
+		case tea.KeyCtrlJ:
+			// Shift+Enter / Alt+Enter / Ctrl+J inserts a newline without submitting!
+			current := m.textInput.Value()
+			pos := m.textInput.Position()
+			if pos > len(current) {
+				pos = len(current)
+			}
+			newVal := current[:pos] + "\n" + current[pos:]
+			m.textInput.SetValue(newVal)
+			m.textInput.SetCursor(pos + 1)
+			return m, nil
+
 		case tea.KeyUp:
 			if m.textInput.Value() == "" {
 				m.viewport.LineUp(1)
@@ -682,6 +744,29 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.viewport.SetContent(m.renderMessages())
 
+	case editorFinishedMsg:
+		if msg.filePath != "" {
+			_ = os.Remove(msg.filePath)
+		}
+		if msg.err != nil {
+			m.addSystemMsg(fmt.Sprintf("[EDITOR] %v", msg.err))
+			return m, nil
+		}
+		text := strings.TrimSpace(msg.content)
+		if text != "" {
+			m.pasteCounter++
+			lines := strings.Split(text, "\n")
+			tokenKey := fmt.Sprintf("[Drafted file #%d +%d lines]", m.pasteCounter, len(lines))
+			if m.pastedSnippets == nil {
+				m.pastedSnippets = make(map[string]string)
+			}
+			m.pastedSnippets[tokenKey] = text
+			m.textInput.SetValue(tokenKey)
+			m.textInput.SetCursor(len(tokenKey))
+			m.addSystemMsg("[EDITOR] ✓ Content loaded into input buffer. Press Enter to send!")
+		}
+		return m, nil
+
 	case tea.MouseMsg:
 		switch msg.Type {
 		case tea.MouseWheelUp:
@@ -802,7 +887,7 @@ func (m *Model) handleTabComplete() {
 			"/pin", "/pins", "/unpin", "/copy", "/files", "/browse",
 			"/clip", "/sidebar", "/clear", "/nick", "/room", "/init", "/repo", "/update",
 			"/diff", "/patch", "/apply", "/branch", "/branches", "/checkout", "/switch",
-			"/pr", "/issue", "/ci",
+			"/pr", "/issue", "/ci", "/editor", "/compose",
 			"/help", "/qr", "/send", "/dir", "/connect",
 		}
 		lowerVal := strings.ToLower(val)
@@ -1848,6 +1933,16 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		}
 		m.addSystemMsg(fmt.Sprintf("[CI/CD] %s", status))
 
+	case "/editor", "/edit", "/compose":
+		if activeProgram != nil {
+			go func() {
+				cmd := openEditorCmd()
+				if cmd != nil {
+					activeProgram.Send(cmd())
+				}
+			}()
+		}
+
 
 
 
@@ -1971,7 +2066,17 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 	}
 }
 
+func (m *Model) setToast(text string, dur time.Duration) {
+	m.toastMsg = text
+	m.toastExpires = time.Now().Add(dur)
+}
+
 func (m *Model) addSystemMsg(text string) {
+	// If it is a short single-line status notification (like nick, theme, etc), display as status toast bar
+	if !strings.Contains(text, "\n") && len(text) < 85 && !strings.Contains(text, "Usage:") && !strings.Contains(text, "[WORKSPACE]") && !strings.Contains(text, "[GIT PATCH") {
+		m.setToast(text, 4*time.Second)
+		return
+	}
 	m.messages = append(m.messages, ChatMessage{
 		SenderName: "SYSTEM",
 		Content:    text,

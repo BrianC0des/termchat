@@ -228,10 +228,24 @@ func (m *Model) View() string {
 			Render(m.updateStatus)
 	}
 
+	var toastBanner string
+	if m.toastMsg != "" && time.Now().Before(m.toastExpires) {
+		toastBanner = lipgloss.NewStyle().
+			Foreground(SecondaryColor).
+			Background(BgLight).
+			Bold(true).
+			Padding(0, 1).
+			Width(m.width).
+			Render(fmt.Sprintf("⚡ %s", m.toastMsg))
+	}
+
 	var layout []string
 	layout = append(layout, headerBar, body)
 	if transferBar != "" {
 		layout = append(layout, transferBar)
+	}
+	if toastBanner != "" {
+		layout = append(layout, toastBanner)
 	}
 	if updateBanner != "" {
 		layout = append(layout, updateBanner)
@@ -496,7 +510,8 @@ func (m *Model) renderFilesModal() string {
 			senderStr := lipgloss.NewStyle().Foreground(WarningColor).Render(fmt.Sprintf("by %s", f.Sender))
 			timeStr := TimeStyle.Render(f.Time.Format("15:04"))
 
-			line := fmt.Sprintf("%s#%d  %-25s  %s  %s", cursor, f.Index, f.FileName, senderStr, timeStr)
+			icon := GetFileIcon(f.FileName, false)
+			line := fmt.Sprintf("%s#%d %s %-25s  %s  %s", cursor, f.Index, icon, f.FileName, senderStr, timeStr)
 			sb.WriteString(itemStyle.Render(line))
 			sb.WriteString("\n")
 		}
