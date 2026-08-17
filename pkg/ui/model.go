@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"termchat/pkg/ghbridge"
 	"termchat/pkg/gitcollab"
 	"termchat/pkg/network"
 	"termchat/pkg/system"
@@ -801,6 +802,7 @@ func (m *Model) handleTabComplete() {
 			"/pin", "/pins", "/unpin", "/copy", "/files", "/browse",
 			"/clip", "/sidebar", "/clear", "/nick", "/room", "/init", "/repo", "/update",
 			"/diff", "/patch", "/apply", "/branch", "/branches", "/checkout", "/switch",
+			"/pr", "/issue", "/ci",
 			"/help", "/qr", "/send", "/dir", "/connect",
 		}
 		lowerVal := strings.ToLower(val)
@@ -1684,10 +1686,23 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 
 	case "/checkout", "/switch":
 		if len(parts) < 2 {
-			m.addSystemMsg("Usage: /checkout <branch_name>\nExample: /checkout feat/auth-tokens")
+			m.addSystemMsg("Usage: /checkout <branch_name_or_#PR>\nExample: /checkout feat/auth-tokens (or /checkout #12)")
 			return
 		}
 		targetBranch := parts[1]
+		if strings.HasPrefix(targetBranch, "#") {
+			prNum, err := strconv.Atoi(strings.TrimPrefix(targetBranch, "#"))
+			if err == nil {
+				msg, chkErr := ghbridge.CheckoutPR(prNum)
+				if chkErr != nil {
+					m.addSystemMsg(fmt.Sprintf("[GH] %v", chkErr))
+				} else {
+					m.addSystemMsg(fmt.Sprintf("🌿 Switched to PR #%d branch! (%s)", prNum, msg))
+				}
+				return
+			}
+		}
+
 		cmd := exec.Command("git", "checkout", targetBranch)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -1695,6 +1710,144 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			return
 		}
 		m.addSystemMsg(fmt.Sprintf("🌿 Switched to Git branch '%s'!", targetBranch))
+
+	case "/pr":
+		if len(parts) < 2 {
+			m.addSystemMsg("Usage: /pr <number> or /pr checkout <number>\nExample: /pr 12")
+			return
+		}
+		if parts[1] == "checkout" && len(parts) > 2 {
+			prNum, err := strconv.Atoi(strings.TrimPrefix(parts[2], "#"))
+			if err != nil {
+				m.addSystemMsg("Usage: /pr checkout <number>")
+				return
+			}
+			msg, err := ghbridge.CheckoutPR(prNum)
+			if err != nil {
+				m.addSystemMsg(fmt.Sprintf("[GH] %v", err))
+				return
+			}
+			m.addSystemMsg(fmt.Sprintf("🌿 Switched to PR #%d branch! (%s)", prNum, msg))
+			return
+		}
+
+		prNum, err := strconv.Atoi(strings.TrimPrefix(parts[1], "#"))
+		if err != nil {
+			m.addSystemMsg("Usage: /pr <number>")
+			return
+		}
+
+		repo := ""
+		if wsCfg, _, err := workspace.FindWorkspace(""); err == nil && wsCfg.Repo != "" {
+			repo = wsCfg.Repo
+		}
+
+		pr, err := ghbridge.FetchPR(repo, prNum)
+		if err != nil {
+			m.addSystemMsg(fmt.Sprintf("[GH] %v", err))
+			return
+		}
+
+		stateIcon := "🟢"
+		if pr.State == "MERGED" {
+			stateIcon = "🟣"
+		} else if pr.State == "CLOSED" {
+			stateIcon = "🔴"
+		}
+
+		reviewStr := "Needs Review"
+		if pr.ReviewState == "APPROVED" {
+			reviewStr = "✅ Approved"
+		} else if pr.ReviewState == "CHANGES_REQUESTED" {
+			reviewStr = "⚠️ Changes Requested"
+		}
+
+		cardMsg := fmt.Sprintf("🐙 **[PULL REQUEST #%d]** %s\n• **Status:** %s %s • **Review:** %s\n• **Branches:** `🌿 %s` ➔ `%s`\n• **Changes:** +%d / -%d • Author: @%s\n• **Action:** Type `/checkout #%d` to checkout locally!\n• URL: %s",
+			pr.Number, pr.Title, stateIcon, pr.State, reviewStr, pr.HeadRefName, pr.BaseRefName, pr.Additions, pr.Deletions, pr.Author, pr.Number, pr.URL)
+
+		m.messages = append(m.messages, ChatMessage{
+			SenderID:   m.manager.LocalID,
+			SenderName: m.manager.LocalName,
+			Content:    cardMsg,
+			Timestamp:  time.Now(),
+			IsMe:       true,
+		})
+		system.AppendHistory(m.manager.RoomName, system.HistoryEntry{
+			SenderID:   m.manager.LocalID,
+			SenderName: m.manager.LocalName,
+			Content:    cardMsg,
+			Timestamp:  time.Now(),
+			IsMe:       true,
+		})
+		_ = m.manager.SendChat(cardMsg)
+		m.viewport.SetContent(m.renderMessages())
+		m.viewport.GotoBottom()
+
+	case "/issue":
+		if len(parts) < 2 {
+			m.addSystemMsg("Usage: /issue <number>\nExample: /issue 4")
+			return
+		}
+		issueNum, err := strconv.Atoi(strings.TrimPrefix(parts[1], "#"))
+		if err != nil {
+			m.addSystemMsg("Usage: /issue <number>")
+			return
+		}
+
+		repo := ""
+		if wsCfg, _, err := workspace.FindWorkspace(""); err == nil && wsCfg.Repo != "" {
+			repo = wsCfg.Repo
+		}
+
+		iss, err := ghbridge.FetchIssue(repo, issueNum)
+		if err != nil {
+			m.addSystemMsg(fmt.Sprintf("[GH] %v", err))
+			return
+		}
+
+		stateIcon := "🟢"
+		if iss.State == "CLOSED" {
+			stateIcon = "🟣"
+		}
+
+		cardMsg := fmt.Sprintf("🐛 **[ISSUE #%d]** %s\n• **Status:** %s %s • **Author:** @%s\n• **Link:** %s",
+			iss.Number, iss.Title, stateIcon, iss.State, iss.Author, iss.URL)
+
+		m.messages = append(m.messages, ChatMessage{
+			SenderID:   m.manager.LocalID,
+			SenderName: m.manager.LocalName,
+			Content:    cardMsg,
+			Timestamp:  time.Now(),
+			IsMe:       true,
+		})
+		system.AppendHistory(m.manager.RoomName, system.HistoryEntry{
+			SenderID:   m.manager.LocalID,
+			SenderName: m.manager.LocalName,
+			Content:    cardMsg,
+			Timestamp:  time.Now(),
+			IsMe:       true,
+		})
+		_ = m.manager.SendChat(cardMsg)
+		m.viewport.SetContent(m.renderMessages())
+		m.viewport.GotoBottom()
+
+	case "/ci":
+		repo := ""
+		if wsCfg, _, err := workspace.FindWorkspace(""); err == nil && wsCfg.Repo != "" {
+			repo = wsCfg.Repo
+		}
+		branch := ""
+		if out, err := exec.Command("git", "branch", "--show-current").Output(); err == nil {
+			branch = strings.TrimSpace(string(out))
+		}
+
+		status, err := ghbridge.FetchCIStatus(repo, branch)
+		if err != nil {
+			m.addSystemMsg(fmt.Sprintf("[CI] %v", err))
+			return
+		}
+		m.addSystemMsg(fmt.Sprintf("[CI/CD] %s", status))
+
 
 
 
