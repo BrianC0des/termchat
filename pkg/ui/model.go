@@ -354,6 +354,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// 1. Intercept terminal native paste / bracketed paste / multi-character burst
 		rawRunes := string(msg.Runes)
+		// Ignore any leaked terminal color probes or responses
+		if strings.Contains(rawRunes, "rgb:") || strings.Contains(rawRunes, "]11;") || strings.Contains(msg.String(), "]11;") {
+			return m, nil
+		}
+
 		if len(msg.Runes) > 1 || strings.Contains(rawRunes, "\n") || strings.Contains(rawRunes, "\r") {
 			clipText := rawRunes
 			if clipText == "" {
@@ -422,11 +427,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case tea.KeyCtrlE, tea.KeyF4:
 			m.expandCodeBlocks = !m.expandCodeBlocks
-			if m.expandCodeBlocks {
-				m.addSystemMsg("[VIEW] Code blocks expanded (Press Ctrl+E or /fold to collapse)")
-			} else {
-				m.addSystemMsg("[VIEW] Code blocks collapsed (Press Ctrl+E or /expand to show full code)")
-			}
 			m.viewport.SetContent(m.renderMessages())
 			return m, nil
 
@@ -1043,11 +1043,6 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 
 	case "/fold", "/expand", "/collapse":
 		m.expandCodeBlocks = !m.expandCodeBlocks
-		if m.expandCodeBlocks {
-			m.addSystemMsg("[VIEW] Code blocks expanded (Press Ctrl+E or /fold to collapse)")
-		} else {
-			m.addSystemMsg("[VIEW] Code blocks collapsed (Press Ctrl+E or /expand to show full code)")
-		}
 		m.viewport.SetContent(m.renderMessages())
 
 	case "/status":

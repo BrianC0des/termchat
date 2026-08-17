@@ -263,7 +263,7 @@ func FormatChatMessageWithFold(rawContent string, wrapWidth int, firstLinePrefix
 		}
 
 		r, err := glamour.NewTermRenderer(
-			glamour.WithAutoStyle(),
+			glamour.WithStandardStyle("dark"),
 			glamour.WithWordWrap(glamourWidth),
 		)
 		if err == nil {
