@@ -96,6 +96,9 @@ type Model struct {
 	hasRoomExpiry bool
 	autoDeleteTTL time.Duration
 	updateStatus  string
+
+	pastedSnippets map[string]string
+	pasteCounter   int
 }
 
 type SidebarMode int
@@ -207,6 +210,7 @@ func NewModel(mgr *network.Manager) *Model {
 		peerBatteries:       make(map[string]system.BatteryInfo),
 		userStatuses:        make(map[string]string),
 		pinnedMsgs:          make([]ChatMessage, 0),
+		pastedSnippets:      make(map[string]string),
 	}
 
 	// Pro Feature: Silent Background Pre-fetching of updates while user chats!
@@ -416,19 +420,47 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyCtrlV:
 			clipText, err := system.ReadClipboard()
 			if err == nil && clipText != "" {
+				clipText = strings.ReplaceAll(clipText, "\r\n", "\n")
+				clipText = strings.ReplaceAll(clipText, "\r", "\n")
+				lines := strings.Split(clipText, "\n")
+
 				current := m.textInput.Value()
 				pos := m.textInput.Position()
 				if pos > len(current) {
 					pos = len(current)
 				}
-				newVal := current[:pos] + clipText + current[pos:]
-				m.textInput.SetValue(newVal)
-				m.textInput.SetCursor(pos + len(clipText))
+
+				if len(lines) > 1 || len(clipText) > 120 {
+					m.pasteCounter++
+					tokenKey := fmt.Sprintf("[Pasted text #%d +%d lines]", m.pasteCounter, len(lines))
+					if m.pastedSnippets == nil {
+						m.pastedSnippets = make(map[string]string)
+					}
+					m.pastedSnippets[tokenKey] = clipText
+
+					newVal := current[:pos] + tokenKey + current[pos:]
+					m.textInput.SetValue(newVal)
+					m.textInput.SetCursor(pos + len(tokenKey))
+				} else {
+					newVal := current[:pos] + clipText + current[pos:]
+					m.textInput.SetValue(newVal)
+					m.textInput.SetCursor(pos + len(clipText))
+				}
 			}
 			return m, nil
 
 		case tea.KeyEnter:
-			input := strings.TrimSpace(m.textInput.Value())
+			rawInput := m.textInput.Value()
+			// Expand any [Pasted text #X +Y lines] tokens back to full multiline snippet!
+			expandedInput := rawInput
+			for token, snippet := range m.pastedSnippets {
+				if strings.Contains(expandedInput, token) {
+					expandedInput = strings.ReplaceAll(expandedInput, token, snippet)
+				}
+			}
+			m.pastedSnippets = make(map[string]string)
+
+			input := strings.TrimSpace(expandedInput)
 			if input != "" {
 				m.handleInput(input)
 				m.textInput.SetValue("")

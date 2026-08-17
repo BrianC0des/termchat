@@ -9,11 +9,12 @@ import (
 )
 
 var (
-	header3Regex  = regexp.MustCompile(`(?i)(?:^|\s{2,})(#{1,4}\s+)`)
-	bulletRegex   = regexp.MustCompile(`(?i)(?:^|\s{2,})([•\-\*]\s+)`)
-	numListRegex  = regexp.MustCompile(`(?i)(?:^|\s{2,})(\d+\.\s+)`)
-	dividerRegex  = regexp.MustCompile(`(?i)(?:^|\s{2,})([─\-]{3,}|={3,})`)
-	codeTickRegex = regexp.MustCompile("`([^`]+)`")
+	header3Regex   = regexp.MustCompile(`(?i)(?:^|\s{2,})(#{1,4}\s+)`)
+	bulletRegex    = regexp.MustCompile(`(?i)(?:^|\s{2,})([•\-\*]\s+)`)
+	numListRegex   = regexp.MustCompile(`(?i)(?:^|\s{2,})(\d+\.\s+)`)
+	dividerRegex   = regexp.MustCompile(`(?i)(?:^|\s{2,})([─\-]{3,}|={3,})`)
+	codeFenceRegex = regexp.MustCompile("(?i)(?:^|\\s{2,})(```[a-zA-Z0-9_-]*)")
+	codeTickRegex  = regexp.MustCompile("`([^`]+)`")
 )
 
 // normalizeFlattenedPaste detects if a pasted snippet had its newlines flattened into spaces,
@@ -25,6 +26,8 @@ func normalizeFlattenedPaste(text string) string {
 
 	// If there are few/no newlines, but contains markdown structure markers separated by 2+ spaces, auto-split
 	if strings.Count(text, "\n") < 2 {
+		// Insert newlines around code fences
+		text = codeFenceRegex.ReplaceAllString(text, "\n$1\n")
 		// Insert newlines before markdown headings (###, ##, #)
 		text = header3Regex.ReplaceAllString(text, "\n$1")
 		// Insert newlines before bullets (•, -, *)
