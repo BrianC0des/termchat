@@ -44,6 +44,7 @@ func main() {
 	versionFlag := flag.Bool("version", false, "Show TermChat version")
 	vFlag := flag.Bool("v", false, "Show TermChat version")
 	initFlag := flag.Bool("init", false, "Initialize a .termchat/room.json project collab room in the current directory")
+	lanFlag := flag.Bool("lan", false, "Initialize or connect in offline Local LAN mode")
 	flag.Parse()
 
 	if *versionFlag || *vFlag {
@@ -55,8 +56,13 @@ func main() {
 	if *initFlag || (len(os.Args) > 1 && os.Args[1] == "init") {
 		cfg := system.LoadConfig()
 		roomName := ""
-		if len(os.Args) > 2 && os.Args[1] == "init" {
-			roomName = os.Args[2]
+		for _, arg := range os.Args[2:] {
+			if !strings.HasPrefix(arg, "-") && roomName == "" {
+				roomName = arg
+			}
+			if arg == "--lan" || arg == "-lan" {
+				*lanFlag = true
+			}
 		}
 		ident, _ := system.GetOrCreateIdentity()
 		fp := ""
@@ -68,6 +74,10 @@ func main() {
 			fmt.Fprintf(os.Stderr, "[ERR] Failed to initialize project room: %v\n", err)
 			os.Exit(1)
 		}
+		if *lanFlag {
+			wsCfg.Relay = "lan"
+			_ = workspace.SaveConfig(path, wsCfg)
+		}
 		fmt.Printf("\n  ╔═══════════════════════════════════════════════════════╗\n")
 		fmt.Printf("  ║   🐙 Project Collab Room Initialized Successfully!    ║\n")
 		fmt.Printf("  ╚═══════════════════════════════════════════════════════╝\n\n")
@@ -76,6 +86,11 @@ func main() {
 			fmt.Printf("  • Repository:  %s\n", wsCfg.Repo)
 		}
 		fmt.Printf("  • Collab Room: %s\n", wsCfg.Room)
+		if wsCfg.Relay == "lan" {
+			fmt.Printf("  • Mode:        Offline Local LAN P2P\n")
+		} else {
+			fmt.Printf("  • Mode:        Cloud Relay (24/7 Global)\n")
+		}
 		fmt.Printf("\n  👉 Commit .termchat/room.json to git so collaborators auto-join on 'git clone'!\n\n")
 		os.Exit(0)
 	}
@@ -150,15 +165,17 @@ func main() {
 		model.SwitchRoomHistory(*roomFlag)
 		mgr.ConnectRelay(*relayFlag, *roomFlag)
 	} else if wsCfg, _, err := workspace.FindWorkspace(""); err == nil && wsCfg.AutoConnect && wsCfg.Room != "" {
-		relayURL := *relayFlag
-		if wsCfg.Relay != "" && *relayFlag == "wss://termchat-o51d.onrender.com/ws" {
-			relayURL = wsCfg.Relay
-		}
+		model.SwitchRoomHistory(wsCfg.Room)
 		if *passFlag == "" && wsCfg.Passphrase != "" {
 			mgr.SetEncryptionPassphrase(wsCfg.Passphrase)
 		}
-		model.SwitchRoomHistory(wsCfg.Room)
-		mgr.ConnectRelay(relayURL, wsCfg.Room)
+		if !*lanFlag && strings.ToLower(wsCfg.Relay) != "lan" && strings.ToLower(wsCfg.Relay) != "local" && wsCfg.Relay != "off" {
+			relayURL := *relayFlag
+			if wsCfg.Relay != "" && *relayFlag == "wss://termchat-o51d.onrender.com/ws" {
+				relayURL = wsCfg.Relay
+			}
+			mgr.ConnectRelay(relayURL, wsCfg.Room)
+		}
 	}
 
 	// 7. Direct connect if specified in CLI

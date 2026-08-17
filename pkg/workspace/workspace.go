@@ -82,6 +82,15 @@ func LoadConfig(filePath string) (*RoomConfig, error) {
 	return &cfg, nil
 }
 
+// SaveConfig writes a room configuration JSON file to disk
+func SaveConfig(filePath string, cfg *RoomConfig) error {
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filePath, data, 0644)
+}
+
 // InitWorkspace creates .termchat/room.json in targetDir
 func InitWorkspace(targetDir, repo, room, pass, creatorFingerprint, creatorName string) (*RoomConfig, string, error) {
 	if targetDir == "" {
