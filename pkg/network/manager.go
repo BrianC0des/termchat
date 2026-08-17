@@ -62,6 +62,7 @@ type NetworkEvents struct {
 	OnStatus       func(senderName, statusText string)
 	OnTopic        func(senderName, topicText string)
 	OnPin          func(senderName, pinText string)
+	OnRoomDestroyed func(senderName string)
 }
 
 type incomingFileState struct {
@@ -473,6 +474,16 @@ func (m *Manager) handlePacket(p *PeerConnection, pkt *Packet) {
 	case MsgTypePin:
 		if m.events.OnPin != nil {
 			m.events.OnPin(pkt.Sender, pkt.Content)
+		}
+
+	case MsgTypeDestroy:
+		room := m.RoomName
+		if room != "" {
+			system.PurgeHistory(room)
+		}
+		m.LeaveRoom()
+		if m.events.OnRoomDestroyed != nil {
+			m.events.OnRoomDestroyed(pkt.Sender)
 		}
 
 	case MsgTypeClipboard:
@@ -1468,4 +1479,15 @@ func (m *Manager) SendPin(pinText string) error {
 		Content:   pinText,
 	}
 	return m.SendPacket(p)
+}
+
+func (m *Manager) BroadcastRoomDestroy() {
+	p := &Packet{
+		Type:      MsgTypeDestroy,
+		SenderID:  m.LocalID,
+		Sender:    m.LocalName,
+		Timestamp: time.Now(),
+		Content:   "ROOM_DESTROYED",
+	}
+	_ = m.SendPacket(p)
 }

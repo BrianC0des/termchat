@@ -31,6 +31,7 @@ const (
 	MsgTypeStatus      MsgType = "status"
 	MsgTypeTopic       MsgType = "topic"
 	MsgTypePin         MsgType = "pin"
+	MsgTypeDestroy     MsgType = "room_destroy"
 )
 
 type Packet struct {

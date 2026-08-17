@@ -220,6 +220,10 @@ type batteryMsg struct {
 	info       system.BatteryInfo
 }
 
+type roomDestroyedMsg struct {
+	senderName string
+}
+
 func NewModel(mgr *network.Manager) *Model {
 	ti := textinput.New()
 	ti.Placeholder = "Type message, /help, /browse, /files, /reply, /room..."
@@ -743,6 +747,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case systemNoticeMsg:
 		m.setToast(msg.text, 5*time.Second)
+
+	case roomDestroyedMsg:
+		// Zero RAM
+		for i := range m.messages {
+			m.messages[i].Content = ""
+			m.messages[i].SenderName = ""
+		}
+		m.messages = []ChatMessage{}
+		m.viewport.SetContent("")
+		m.setToast(fmt.Sprintf("💥 [ROOM DESTROYED] Room was destroyed by @%s! Memory wiped and session closed.", msg.senderName), 10*time.Second)
+		return m, nil
 
 	case fileProgressMsg:
 		p := msg.progress
@@ -1427,20 +1442,22 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		if len(parts) >= 2 {
 			codeArg := strings.TrimSpace(parts[1])
 			if (m.destroyCode != "" && strings.EqualFold(codeArg, m.destroyCode)) || strings.EqualFold(codeArg, room) || strings.EqualFold(codeArg, "confirm") {
-				// 1. Zero out memory buffers
+				// 1. Broadcast self-destruct signal to all room members
+				m.manager.BroadcastRoomDestroy()
+				// 2. Zero out memory buffers
 				for i := range m.messages {
 					m.messages[i].Content = ""
 					m.messages[i].SenderName = ""
 				}
 				m.messages = []ChatMessage{}
-				// 2. Permanently purge history files on disk
+				// 3. Permanently purge history files on disk
 				system.PurgeHistory(room)
-				// 3. Disconnect from cloud room
+				// 4. Disconnect from cloud room
 				m.manager.LeaveRoom()
 				m.destroyCode = ""
 				m.destroyRoom = ""
 				m.viewport.SetContent("")
-				m.setToast(fmt.Sprintf("💥 [DESTROYED] Room #%s wiped! Memory zero-filled, history deleted, and session closed.", room), 6*time.Second)
+				m.setToast(fmt.Sprintf("💥 [DESTROYED] Room #%s wiped for ALL members! Memory zero-filled, history deleted, and session closed.", room), 8*time.Second)
 				return
 			}
 			m.setToast(fmt.Sprintf("❌ [ERR] Incorrect code '%s'. Type '/destroy' to generate a confirmation code.", codeArg), 5*time.Second)
@@ -2360,6 +2377,9 @@ func SetupEventBridge(p *tea.Program) network.NetworkEvents {
 		},
 		OnPin: func(senderName, pinText string) {
 			p.Send(pinUpdateMsg{senderName: senderName, pinText: pinText})
+		},
+		OnRoomDestroyed: func(senderName string) {
+			p.Send(roomDestroyedMsg{senderName: senderName})
 		},
 	}
 }
