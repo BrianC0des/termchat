@@ -1,100 +1,128 @@
 # :: TERMCHAT ::
 
-**TermChat** is a cross-platform, peer-to-peer and cloud-connected TUI (Terminal User Interface) companion and secret messenger for **Windows**, **macOS**, **Linux**, and **Android (Termux)**.
+> **Terminal-First Developer Collab Room & Secret Messenger** for **Linux**, **Windows**, **macOS (Apple Silicon)**, and **Android (Termux)**.
 
-Powered by **Go**, **Bubble Tea**, **Lip Gloss**, and **24/7 Global WebSockets**.
+[![Release](https://img.shields.io/github/v/release/BrianC0des/termchat?style=flat-square&color=50fa7b)](https://github.com/BrianC0des/termchat/releases)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/BrianC0des/termchat/release.yml?style=flat-square)](https://github.com/BrianC0des/termchat/actions)
+[![License](https://img.shields.io/github/license/BrianC0des/termchat?style=flat-square)](LICENSE)
+
+TermChat brings modern developer collaboration directly into your terminal. Zero-commit live git diff sharing, 1-command patch application, GitHub PR/Issue cards, Discord-style collapsible code folding, external editor compose (`nvim`/`nano`), and end-to-end encrypted team rooms.
 
 ---
 
-## :: 1-Line Quick Installation (via Terminal) ::
+## ⚡ 1-Line Universal Install
 
-Run the command for your operating system to download and install TermChat instantly:
+Install or update TermChat with a single command:
 
-### [Android / Termux]
+### 🐧 Linux, 🍏 macOS (Apple Silicon), & 📱 Android (Termux)
 ```bash
-curl -sSL https://github.com/BrianC0des/termchat/releases/latest/download/termchat-android-arm64 -o $PREFIX/bin/termchat && chmod +x $PREFIX/bin/termchat
+curl -fsSL https://raw.githubusercontent.com/BrianC0des/termchat/main/install.sh | bash
 ```
 
-### [Linux x86_64 / PC / Laptop]
-```bash
-mkdir -p ~/.local/bin && curl -sSL https://github.com/BrianC0des/termchat/releases/latest/download/termchat-linux-amd64 -o ~/.local/bin/termchat && chmod +x ~/.local/bin/termchat
-```
-
-### [Linux ARM64 / Raspberry Pi]
-```bash
-mkdir -p ~/.local/bin && curl -sSL https://github.com/BrianC0des/termchat/releases/latest/download/termchat-linux-arm64 -o ~/.local/bin/termchat && chmod +x ~/.local/bin/termchat
-```
-
-### [macOS Apple Silicon M1-M4]
-```bash
-sudo curl -sSL https://github.com/BrianC0des/termchat/releases/latest/download/termchat-mac-apple-silicon -o /usr/local/bin/termchat && sudo chmod +x /usr/local/bin/termchat
-```
-
-### [macOS Intel]
-```bash
-sudo curl -sSL https://github.com/BrianC0des/termchat/releases/latest/download/termchat-mac-intel -o /usr/local/bin/termchat && sudo chmod +x /usr/local/bin/termchat
-```
-
-### [Windows PowerShell]
+### 🪟 Windows (PowerShell)
 ```powershell
-New-Item -ItemType Directory -Force "$HOME\bin"; curl.exe -sSL https://github.com/BrianC0des/termchat/releases/latest/download/termchat-windows.exe -o "$HOME\bin\termchat.exe"; & "$HOME\bin\termchat.exe"
+irm https://raw.githubusercontent.com/BrianC0des/termchat/main/install.ps1 | iex
 ```
 
 ---
 
-## :: How to Launch & Create Rooms ::
+## 🐙 Project Collab Rooms (Auto-Join on `git clone`)
 
-### 1. Join a 24/7 Cloud Room (Works Anywhere in the World):
-```bash
-termchat -name "YourNick" -room "secret-squad" -pass "mysecretpassword123"
-```
-*(Connected via the 24/7 Global Relay at `wss://termchat-o51d.onrender.com/ws`)*
+Turn any Git repository into an instant developer collaboration space:
 
-### 2. Local Wi-Fi Mode (Zero-Config Auto-Discovery):
+### 1. Initialize your project room
 ```bash
-termchat
+cd my-project
+termchat init my-team-room
 ```
-*(Automatically discovers and connects to all devices on the same Wi-Fi without internet!)*
+This generates `.termchat/room.json` linked to your Git remote repository.
+
+### 2. Teammates clone and auto-join
+```bash
+git clone https://github.com/my-org/my-project.git
+cd my-project && termchat
+```
+TermChat automatically detects `.termchat/room.json` and connects your team into the project room in seconds!
 
 ---
 
-## :: Command Cheatsheet (Inside Chat) ::
+## 🚀 Key Features
+
+### 🌿 Zero-Commit Git Diff Sharing & 1-Key Patching
+- `/diff` (or `/diff staged`): Captures your current uncommitted changes and broadcasts an interactive patch card.
+- `/apply <patch_id>`: Any teammate can apply the diff directly to their local repository with safe collision dry-runs.
+- `/branch` & `/checkout <branch>`: Inspect branches and switch workspaces without leaving chat.
+
+### 🐙 Native GitHub PR, Issue & CI/CD Integration
+- `/pr <number>`: Live pull request inspection (review approvals, additions/deletions, branches).
+- `/checkout #<number>`: Check out any PR branch locally with 1 command.
+- `/issue <number>`: Interactive issue preview cards.
+- `/ci`: Real-time GitHub Actions workflow status report.
+
+### 📝 External Editor Compose (`nvim` / `nano` / `vim`)
+- Press `Ctrl+X` or type `/editor` to open your favorite editor to compose long code blocks, markdown notes, or architectural thoughts. Auto-populates into chat upon save.
+
+### ⌨️ Modern Terminal UX
+- **Multiline Input**: Press `Shift+Enter` or `Alt+Enter` to insert newlines without sending.
+- **Collapsible Code Blocks**: Press `Ctrl+E` or `F4` to fold/unfold long stacktraces and code snippets.
+- **Clean Toast Status Bar**: Transient status notifications (`⚡`) display in the header bar instead of cluttering chat history.
+- **Interactive File Vault**: Press `Ctrl+F` to browse shared room files or `Ctrl+O` to open the visual file picker with custom folder (`📁`) and language icons (`🐹`, `🐍`, `🦀`, `📜`, `⚙️`, `🌐`).
+
+### 🛡️ End-to-End Encryption & Device Identity
+- **AES-256-GCM E2E**: Encrypts messages and file transfers with key verification codes.
+- **Ed25519 Cryptographic Identity**: Persistent device keys (`/identity`) preventing impersonation.
+- **Room Moderation**: `/invite` (1-click magic link & QR), `/kick`, `/ban`, `/unban`, and `/banlist`.
+
+---
+
+## 📋 Slash Command Cheatsheet
 
 | Command | Shortcut | Description |
 |---|---|---|
-| `/room <name> [pass]` | | Create or join a 24/7 Cloud room with optional E2E password |
-| `/lan` / `/offline` | | Switch to 100% offline local Wi-Fi direct P2P mode |
-| `/send <file> [expiry]` | `Tab` | Send file/folder with optional expiration (`10m`, `1h`, `1d`, `7d`) |
-| `/files` | `Ctrl + F` | Open Shared Files Vault sidebar to select & download |
-| `/get <num\|url>` | | Download file from cloud URL or # vault index number |
-| `/browse` | `Ctrl + O` | Open interactive TUI file explorer to pick and send files |
-| `/nick <name>` | | Change and permanently save your default nickname |
-| `/reply <#> <msg>` | | Reply directly to a specific message ID |
-| `/copy <#>` | | Copy specific message text to system clipboard |
-| `/pin <#>` | | Pin important message to top header banner |
-| `/clip` or `/c` | | Push your clipboard directly to connected peers |
-| `/theme <name>` | | Switch UI theme (`catppuccin`, `dracula`, `nord`, `matrix`, etc.) |
-| `/expire <dur>` | `-ttl` | Set self-destruct countdown timer (e.g. `/expire 30m`, `/expire 1h`) |
-| `/autodelete <dur>` | `-autodelete` | Enable disappearing auto-delete messages (e.g. `/autodelete 5m`) |
-| `/peers` / `/ip` | | Show room members online and local network IP |
-| `/update` | | 1-Click Self-Update TermChat to the latest version |
-| `/help` | `F1` | Open in-app command cheatsheet |
-| `/clear` / `/quit` | `Ctrl + C` | Clear message buffer / Quit TermChat |
+| `/diff` / `/patch` | | Broadcast uncommitted Git diff card with `#patch-xxxx` ID |
+| `/apply <patch_id>` | | Safely apply shared patch to your local workspace |
+| `/branch` / `/checkout <name>` | | Inspect active branch or switch branches |
+| `/pr <#>` / `/checkout #<#>` | | Fetch GitHub PR card or checkout PR branch |
+| `/issue <#>` / `/ci` | | Preview GitHub Issue or check GitHub Actions CI status |
+| `/editor` / `/compose` | `Ctrl + X` | Open `$EDITOR` (`nvim`/`nano`/`vim`) to compose text |
+| `/init [room]` | | Scaffold `.termchat/room.json` for team auto-join |
+| `/room <name> [pass]` | | Join or create a 24/7 cloud room |
+| `/invite` / `/qr` | | Generate 1-click room invite link and ASCII QR code |
+| `/identity` / `/whoami` | | Show device Ed25519 fingerprint & public key |
+| `/kick <user>` / `/ban <user>` | | Room moderation and banlist management |
+| `/files` | `Ctrl + F` | Open Shared Files Vault modal |
+| `/get <id\|#\|name>` | | 1-command download shared room file |
+| `/browse` / `/send <file>` | `Ctrl + O` | Visual file explorer / send file with optional TTL |
+| `/theme <name>` | | Switch themes (`catppuccin`, `dracula`, `nord`, `matrix`, `tokyonight`) |
+| `/update` | | 1-Click self-update binary to latest release |
+| `/help` | `F1` | Interactive help modal |
 
 ---
 
-## :: Security & Privacy ::
-- **End-to-End Encryption**: When a room has a password (`-pass` or `/auth`), messages and files are encrypted with **AES-256-GCM** before leaving your device.
-- **Visual Key Fingerprint**: Telegram-style 4-emoji verification (`🦊 🚀 💎 ⚡`) to prevent MITM attacks.
-- **Zero Server Logging & RAM Wipes**: The relay server acts purely as a stateless router. Self-destructing rooms zero-fill RAM buffers and purge history upon expiration.
+## 📦 4-Platform Architecture
+
+TermChat compiles and releases dedicated native binaries for:
+- **Linux x86_64** (`.tar.zst`)
+- **Windows x86_64** (`.zip`)
+- **macOS Apple Silicon M1-M4** (`.tar.zst`)
+- **Android Termux ARM64** (`.tar.zst`)
 
 ---
 
-## :: Building From Source ::
+## 🛠️ Building From Source
 
 ```bash
 git clone https://github.com/BrianC0des/termchat.git
 cd termchat
+go build -o termchat .
+```
+
+To build all 4 release targets:
+```bash
 ./build-all.sh
 ```
-Binary outputs will be placed in `./dist/`.
+
+---
+
+## 📜 License
+MIT License © [BrianC0des](https://github.com/BrianC0des)
