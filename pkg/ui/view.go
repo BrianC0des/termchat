@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"termchat/pkg/network"
 	"termchat/pkg/system"
@@ -60,20 +61,45 @@ func (m *Model) View() string {
 		}
 	}
 
+	// Encryption status badge with Telegram-style 4-emoji verification hash
+	var lockBadge string
+	if m.manager.EncryptionKey != nil {
+		emojiHash := system.GenerateEmojiFingerprint(m.manager.EncryptionKey)
+		lockBadge = lipgloss.NewStyle().Foreground(AccentColor).Bold(true).Render(fmt.Sprintf(" [AES-256: %s]", emojiHash))
+	}
+
+	// Room TTL countdown pill
+	var ttlBadge string
+	if m.hasRoomExpiry {
+		rem := time.Until(m.roomExpiry)
+		if rem > 0 {
+			secs := int(rem.Seconds())
+			mins := secs / 60
+			hours := mins / 60
+			timeStr := fmt.Sprintf("%02dm %02ds", mins%60, secs%60)
+			if hours > 0 {
+				timeStr = fmt.Sprintf("%02dh %02dm", hours, mins%60)
+			}
+			ttlBadge = " " + lipgloss.NewStyle().Foreground(WarningColor).Background(BgLight).Bold(true).Padding(0, 1).Render(fmt.Sprintf("⏳ %s", timeStr))
+		}
+	}
+
+	// Auto-delete / Disappearing message badge
+	var autoDeleteBadge string
+	if m.autoDeleteTTL > 0 {
+		autoDeleteBadge = " " + lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render(fmt.Sprintf("[⏱️ %s]", m.autoDeleteTTL))
+	}
+
 	headerLeft := lipgloss.JoinHorizontal(
 		lipgloss.Center,
 		TitleStyle.Render(":: TERMCHAT ::"),
 		" ",
 		modeBadge,
+		ttlBadge,
+		autoDeleteBadge,
 		" ",
 		SubTitleStyle.Render(fmt.Sprintf("[%s]", m.manager.LocalName)),
 	)
-
-	// Encryption status badge in header
-	var lockBadge string
-	if m.manager.EncryptionKey != nil {
-		lockBadge = lipgloss.NewStyle().Foreground(AccentColor).Bold(true).Render(" [AES-256]")
-	}
 
 	headerRight := lipgloss.JoinHorizontal(
 		lipgloss.Center,

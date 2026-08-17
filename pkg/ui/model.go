@@ -28,6 +28,7 @@ type ChatMessage struct {
 	ReplyToNum    int
 	ReplyToSender string
 	ReplyToText   string
+	ExpiresAt     time.Time
 }
 
 type SharedFileItem struct {
@@ -59,11 +60,14 @@ type Model struct {
 	showFilesModal  bool
 	selectedFileIdx int
 
-	roomTopic    string
-	pinnedMsgs   []ChatMessage
-	userStatuses map[string]string
-	myStatus     string
-	sidebarMode  SidebarMode
+	roomTopic     string
+	pinnedMsgs    []ChatMessage
+	userStatuses  map[string]string
+	myStatus      string
+	sidebarMode   SidebarMode
+	roomExpiry    time.Time
+	hasRoomExpiry bool
+	autoDeleteTTL time.Duration
 }
 
 type SidebarMode int
@@ -190,10 +194,34 @@ func NewModel(mgr *network.Manager) *Model {
 	return m
 }
 
+func (m *Model) SetRoomTTL(d time.Duration) {
+	if d > 0 {
+		m.hasRoomExpiry = true
+		m.roomExpiry = time.Now().Add(d)
+		m.addSystemMsg(fmt.Sprintf("[TTL] Room set to self-destruct in %s (at %s).", d.Round(time.Second), m.roomExpiry.Format("15:04:05")))
+	} else {
+		m.hasRoomExpiry = false
+		m.addSystemMsg("[TTL] Room self-destruct timer disabled.")
+	}
+}
+
+func (m *Model) SetAutoDeleteTTL(d time.Duration) {
+	m.autoDeleteTTL = d
+}
+
+type tickUIMsg time.Time
+
+func tickUICmd() tea.Cmd {
+	return tea.Tick(1*time.Second, func(t time.Time) tea.Msg {
+		return tickUIMsg(t)
+	})
+}
+
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		textinput.Blink,
 		tea.EnterAltScreen,
+		tickUICmd(),
 	)
 }
 
@@ -392,7 +420,52 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textInput.Width = m.width - 10
 		m.viewport.GotoBottom()
 
+	case tickUIMsg:
+		cmds = append(cmds, tickUICmd())
+
+		// 1. Check Room TTL Expiration
+		if m.hasRoomExpiry && time.Now().After(m.roomExpiry) {
+			m.hasRoomExpiry = false
+			// Secure RAM zeroing & history purge
+			for i := range m.messages {
+				m.messages[i].Content = ""
+				m.messages[i].SenderName = ""
+			}
+			m.messages = []ChatMessage{}
+			system.PurgeHistory(m.manager.RoomName)
+			if m.manager.RoomName != "" {
+				m.manager.LeaveRoom()
+			}
+			m.addSystemMsg("💥 [ROOM SELF-DESTRUCT] Room TTL has expired! Memory zero-filled, history files purged, and session closed.")
+			m.viewport.SetContent(m.renderMessages())
+		}
+
+		// 2. Check and Purge Expired Disappearing Messages
+		if len(m.messages) > 0 {
+			now := time.Now()
+			activeMsgs := make([]ChatMessage, 0, len(m.messages))
+			changed := false
+			for _, msg := range m.messages {
+				if !msg.ExpiresAt.IsZero() && now.After(msg.ExpiresAt) {
+					changed = true
+					continue
+				}
+				activeMsgs = append(activeMsgs, msg)
+			}
+			if changed {
+				m.messages = activeMsgs
+				m.viewport.SetContent(m.renderMessages())
+			} else if m.autoDeleteTTL > 0 || m.hasRoomExpiry {
+				// Refresh countdown timers in view
+				m.viewport.SetContent(m.renderMessages())
+			}
+		}
+
 	case incomingMsg:
+		var expiresAt time.Time
+		if m.autoDeleteTTL > 0 {
+			expiresAt = time.Now().Add(m.autoDeleteTTL)
+		}
 		msgEntry := ChatMessage{
 			SenderID:      msg.senderID,
 			SenderName:    msg.senderName,
@@ -403,6 +476,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ReplyToNum:    msg.replyNum,
 			ReplyToSender: msg.replySender,
 			ReplyToText:   msg.replyText,
+			ExpiresAt:     expiresAt,
 		}
 		m.messages = append(m.messages, msgEntry)
 		system.AppendHistory(m.manager.RoomName, system.HistoryEntry{
@@ -651,12 +725,18 @@ func (m *Model) handleInput(text string) {
 	}
 
 	// Normal Chat Message - always append locally and save
+	var expiresAt time.Time
+	if m.autoDeleteTTL > 0 {
+		expiresAt = time.Now().Add(m.autoDeleteTTL)
+	}
+
 	m.messages = append(m.messages, ChatMessage{
 		SenderID:   m.manager.LocalID,
 		SenderName: m.manager.LocalName,
 		Content:    text,
 		Timestamp:  time.Now(),
 		IsMe:       true,
+		ExpiresAt:  expiresAt,
 	})
 	system.AppendHistory(m.manager.RoomName, system.HistoryEntry{
 		SenderID:   m.manager.LocalID,
@@ -1101,7 +1181,60 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		}
 		pass := parts[1]
 		m.manager.SetEncryptionPassphrase(pass)
-		m.addSystemMsg("[AES-256] End-to-End Encryption enabled!")
+		fingerprint := system.GenerateEmojiFingerprint(m.manager.EncryptionKey)
+		m.addSystemMsg(fmt.Sprintf("[AES-256] End-to-End Encryption enabled! Key Fingerprint: [ %s ]", fingerprint))
+
+	case "/expire", "/ttl":
+		if len(parts) < 2 {
+			if m.hasRoomExpiry {
+				rem := time.Until(m.roomExpiry)
+				if rem > 0 {
+					m.addSystemMsg(fmt.Sprintf("[TTL] ⏳ Room expires in %s (at %s). Use `/expire off` to cancel.", rem.Round(time.Second), m.roomExpiry.Format("15:04:05")))
+				} else {
+					m.addSystemMsg("[TTL] Room has expired.")
+				}
+			} else {
+				m.addSystemMsg("Usage: /expire <duration>  (e.g., /expire 30m, /expire 1h, /expire 24h, /expire off)")
+			}
+			return
+		}
+		arg := strings.ToLower(parts[1])
+		if arg == "off" || arg == "clear" || arg == "disable" || arg == "0" {
+			m.hasRoomExpiry = false
+			m.addSystemMsg("[TTL] Room self-destruct timer disabled.")
+		} else {
+			dur, err := time.ParseDuration(arg)
+			if err != nil || dur <= 0 {
+				m.addSystemMsg(fmt.Sprintf("[ERR] Invalid duration '%s'. Examples: `/expire 10m`, `/expire 1h`, `/expire 24h`", parts[1]))
+				return
+			}
+			m.hasRoomExpiry = true
+			m.roomExpiry = time.Now().Add(dur)
+			m.addSystemMsg(fmt.Sprintf("[TTL] ⏳ Room set to self-destruct in %s (at %s). Local history & buffers will be wiped upon expiration.", dur.Round(time.Second), m.roomExpiry.Format("15:04:05")))
+		}
+
+	case "/autodelete", "/burn", "/ephemeral":
+		if len(parts) < 2 {
+			if m.autoDeleteTTL > 0 {
+				m.addSystemMsg(fmt.Sprintf("[AUTODELETE] Auto-delete is ACTIVE (%s). Messages disappear after %s. Use `/autodelete off` to disable.", m.autoDeleteTTL, m.autoDeleteTTL))
+			} else {
+				m.addSystemMsg("Usage: /autodelete <duration>  (e.g., /autodelete 30s, /autodelete 5m, /autodelete 1h, /autodelete off)")
+			}
+			return
+		}
+		arg := strings.ToLower(parts[1])
+		if arg == "off" || arg == "clear" || arg == "disable" || arg == "0" {
+			m.autoDeleteTTL = 0
+			m.addSystemMsg("[AUTODELETE] Disappearing messages disabled.")
+		} else {
+			dur, err := time.ParseDuration(arg)
+			if err != nil || dur <= 0 {
+				m.addSystemMsg(fmt.Sprintf("[ERR] Invalid duration '%s'. Examples: `/autodelete 30s`, `/autodelete 5m`, `/autodelete 1h`", parts[1]))
+				return
+			}
+			m.autoDeleteTTL = dur
+			m.addSystemMsg(fmt.Sprintf("[AUTODELETE] ⏱️ New messages will automatically self-destruct %s after delivery.", dur.Round(time.Second)))
+		}
 
 	case "/files", "/shared", "/vault", "/downloads":
 		m.refreshSharedFiles()
@@ -1533,7 +1666,15 @@ func (m *Model) renderMessages() string {
 
 			numBadge := lipgloss.NewStyle().Foreground(MutedColor).Render(fmt.Sprintf("#%d", msgIdx))
 			timeStr := TimeStyle.Render(msg.Timestamp.Format("15:04:05"))
-			prefix := fmt.Sprintf("%s %s", timeStr, numBadge)
+			var timerBadge string
+			if !msg.ExpiresAt.IsZero() {
+				rem := time.Until(msg.ExpiresAt)
+				if rem > 0 {
+					secs := int(rem.Seconds())
+					timerBadge = " " + lipgloss.NewStyle().Foreground(WarningColor).Bold(true).Render(fmt.Sprintf("[⏱️ %02d:%02d]", secs/60, secs%60))
+				}
+			}
+			prefix := fmt.Sprintf("%s %s%s", timeStr, numBadge, timerBadge)
 
 			renderedContent := msg.Content
 			myMention := "@" + m.manager.LocalName

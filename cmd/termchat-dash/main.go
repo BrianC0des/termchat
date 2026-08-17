@@ -125,7 +125,7 @@ func initialModel() model {
 
 	return model{
 		relayURL:    "wss://termchat-o51d.onrender.com/ws",
-		latestTag:   "v1.8.2",
+		latestTag:   "v1.8.3",
 		commitHash:  "main",
 		ghStatus:    "Syncing telemetry...",
 		platforms:   defaultPlatforms,
@@ -283,7 +283,7 @@ func fetchMirrorPingCmd(relayURL string) tea.Cmd {
 		return mirrorPingMsg{
 			githubMs: pingHost("https://api.github.com/zen"),
 			fastlyMs: pingHost("https://raw.githubusercontent.com/BrianC0des/termchat/main/go.mod"),
-			googleMs: pingHost("https://google.com"),
+			googleMs: pingHost("https://dns.google/resolve?name=github.com"),
 			relayMs:  pingHost(httpRelay),
 		}
 	}
@@ -295,9 +295,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
-		case "r":
+		case "r", "R":
+			m.lastUpdated = time.Now()
+			m.ghStatus = "⚡ Refreshing live metrics..."
 			return m, tea.Batch(fetchReleaseDataCmd(), fetchMirrorPingCmd(m.relayURL))
-		case "f":
+		case "f", "F":
 			switch m.logFilter {
 			case "ALL":
 				m.logFilter = "NET"
@@ -309,7 +311,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.logFilter = "ALL"
 			}
 			return m, nil
-		case "c":
+		case "c", "C":
 			m.logs = []string{fmt.Sprintf("%s [SYS] Logs cleared", time.Now().Format("15:04:05"))}
 			return m, nil
 		}

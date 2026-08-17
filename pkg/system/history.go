@@ -83,3 +83,9 @@ func LoadHistory(room string, limit int) []HistoryEntry {
 	}
 	return entries
 }
+
+// PurgeHistory securely removes all saved chat logs for a given room
+func PurgeHistory(room string) {
+	path := getRoomHistoryPath(room)
+	_ = os.Remove(path)
+}

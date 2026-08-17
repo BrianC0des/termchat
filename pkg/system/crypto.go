@@ -67,3 +67,27 @@ func Decrypt(cipherBase64 string, key []byte) (string, error) {
 
 	return string(plaintext), nil
 }
+
+var emojiList = []string{
+	"🦊", "🚀", "💎", "⚡", "🪐", "🔥", "🛡️", "🎯",
+	"🍕", "🌊", "⭐", "🍀", "🔑", "👾", "🛸", "⚓",
+	"🦅", "🌋", "🔮", "🌈", "🍉", "🐬", "🌴", "🦁",
+	"🐯", "🌵", "🎸", "🎲", "🧩", "🏆", "🏎️", "🚁",
+	"🦄", "🐉", "🍁", "🍄", "🥑", "🍓", "🍍", "🍔",
+	"☕", "🍸", "🍦", "🍩", "🏀", "⚽", "🎾", "🛹",
+	"🛰️", "🧭", "🏰", "🗼", "🗽", "🎪", "🎨", "🎬",
+	"💎", "💡", "🔔", "👑", "🎩", "🧿", "🪄", "🪅",
+}
+
+// GenerateEmojiFingerprint generates a Telegram-style 4-emoji visual verification hash from an encryption key
+func GenerateEmojiFingerprint(key []byte) string {
+	if len(key) == 0 {
+		return ""
+	}
+	hash := sha256.Sum256(key)
+	e1 := emojiList[int(hash[0])%len(emojiList)]
+	e2 := emojiList[int(hash[1])%len(emojiList)]
+	e3 := emojiList[int(hash[2])%len(emojiList)]
+	e4 := emojiList[int(hash[3])%len(emojiList)]
+	return fmt.Sprintf("%s %s %s %s", e1, e2, e3, e4)
+}
