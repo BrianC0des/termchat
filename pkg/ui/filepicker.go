@@ -132,40 +132,40 @@ func (fp *FilePicker) Select() (selectedFile string, isSelected bool) {
 func GetFileIcon(name string, isDir bool) string {
 	if isDir {
 		if name == ".." {
-			return "📁 ⮤ "
+			return "[DIR] ⮤ "
 		}
-		return "📁 "
+		return "[DIR] "
 	}
 	ext := strings.ToLower(filepath.Ext(name))
 	switch ext {
 	case ".go":
-		return "🐹 "
+		return "[go] "
 	case ".py":
-		return "🐍 "
+		return "[py] "
 	case ".rs":
-		return "🦀 "
+		return "[rs] "
 	case ".js", ".ts", ".jsx", ".tsx":
-		return "📜 "
+		return "[ts] "
 	case ".c", ".cpp", ".h", ".hpp":
-		return "⚙️ "
+		return "[c] "
 	case ".html", ".css", ".json", ".yaml", ".yml", ".toml", ".xml":
-		return "🌐 "
+		return "[web] "
 	case ".sh", ".bash", ".zsh", ".fish":
-		return "💻 "
+		return "[sh] "
 	case ".sql", ".db", ".sqlite":
-		return "🗃️ "
+		return "[db] "
 	case ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".ico":
-		return "🖼️ "
+		return "[img] "
 	case ".zip", ".tar", ".zst", ".gz", ".7z", ".rar", ".bz2":
-		return "📦 "
+		return "[zip] "
 	case ".mp3", ".wav", ".flac", ".ogg", ".m4a":
-		return "🎵 "
+		return "[audio] "
 	case ".mp4", ".mkv", ".webm", ".avi", ".mov":
-		return "🎬 "
+		return "[video] "
 	case ".pdf", ".md", ".txt", ".doc", ".docx":
-		return "📝 "
+		return "[doc] "
 	default:
-		return "📄 "
+		return "[file] "
 	}
 }
 

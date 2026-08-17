@@ -1200,7 +1200,7 @@ func (m *Manager) SendFileWithExpiry(filePath, expiry string) error {
 					shortID = parts[0]
 				}
 			}
-			shareMsg := fmt.Sprintf("📦 **[SHARED FILE]** `%s` (%s)\n• **Expires:** ⏳ %s • **Download:** Type `/get %s` (or click link below)\n• %s", fileName, FormatBytes(fileSize), expiresIn, shortID, dlURL)
+			shareMsg := fmt.Sprintf("**[SHARED FILE]** `%s` (%s)\n• **Expires:** %s • **Download:** Type `/get %s`\n• %s", fileName, FormatBytes(fileSize), expiresIn, shortID, dlURL)
 			_ = m.SendChat(shareMsg)
 			if m.events.OnMessage != nil {
 				m.events.OnMessage(m.LocalID, m.LocalName, shareMsg, time.Now(), 0, "", "")

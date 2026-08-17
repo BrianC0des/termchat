@@ -643,7 +643,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.manager.RoomName != "" {
 				m.manager.LeaveRoom()
 			}
-			m.addSystemMsg("💥 [ROOM SELF-DESTRUCT] Room TTL has expired! Memory zero-filled, history files purged, and session closed.")
+			m.addSystemMsg("[ROOM SELF-DESTRUCT] Room TTL has expired! Memory zero-filled, history files purged, and session closed.")
 			m.viewport.SetContent(m.renderMessages())
 		}
 
@@ -756,7 +756,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.messages = []ChatMessage{}
 		m.viewport.SetContent("")
-		m.setToast(fmt.Sprintf("💥 [ROOM DESTROYED] Room was destroyed by @%s! Memory wiped and session closed.", msg.senderName), 10*time.Second)
+		m.setToast(fmt.Sprintf("[ROOM DESTROYED] Room was destroyed by @%s! Memory wiped and session closed.", msg.senderName), 10*time.Second)
 		return m, nil
 
 	case fileProgressMsg:
@@ -787,7 +787,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pastedSnippets[tokenKey] = text
 			m.textInput.SetValue(tokenKey)
 			m.textInput.SetCursor(len(tokenKey))
-			m.setToast("[EDITOR] ✓ Content loaded into input buffer. Press Enter to send!", 4*time.Second)
+			m.setToast("[EDITOR] Content loaded into input buffer. Press Enter to send!", 4*time.Second)
 		}
 		return m, nil
 
@@ -802,7 +802,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case fileReceivedMsg:
-		m.setToast(fmt.Sprintf("✓ [RECV] Received '%s' (%s) from %s", msg.fileName, network.FormatBytes(msg.size), msg.senderName), 6*time.Second)
+		m.setToast(fmt.Sprintf("[RECV] Received '%s' (%s) from %s", msg.fileName, network.FormatBytes(msg.size), msg.senderName), 6*time.Second)
 	}
 
 	if !m.filePicker.Active {
@@ -1375,7 +1375,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		m.addSystemMsg(fmt.Sprintf("[AUDIO] Sent media command: %s", action))
 
 	case "/update", "/upgrade":
-		m.updateStatus = "⚡ [UPDATE] Checking for updates..."
+		m.updateStatus = "[UPDATE] Checking for updates..."
 		go func() {
 			msg, err := system.UpdateSelfWithProgress(func(progressMsg string) {
 				if activeProgram != nil {
@@ -1451,7 +1451,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 				if creatorStr == "" {
 					creatorStr = wsCfg.CreatorFingerprint
 				}
-				m.setToast(fmt.Sprintf("🛡️ [AUTH] Only the room creator (@%s) can destroy this room. Use '/room leave' to exit.", creatorStr), 6*time.Second)
+				m.setToast(fmt.Sprintf("[AUTH] Only the room creator (@%s) can destroy this room. Use '/room leave' to exit.", creatorStr), 6*time.Second)
 				return
 			}
 		}
@@ -1474,10 +1474,10 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 				m.destroyCode = ""
 				m.destroyRoom = ""
 				m.viewport.SetContent("")
-				m.setToast(fmt.Sprintf("💥 [DESTROYED] Room #%s wiped for ALL members! Memory zero-filled, history deleted, and session closed.", room), 8*time.Second)
+				m.setToast(fmt.Sprintf("[DESTROYED] Room #%s wiped for ALL members! Memory zero-filled, history deleted, and session closed.", room), 8*time.Second)
 				return
 			}
-			m.setToast(fmt.Sprintf("❌ [ERR] Incorrect code '%s'. Type '/destroy' to generate a confirmation code.", codeArg), 5*time.Second)
+			m.setToast(fmt.Sprintf("[ERR] Incorrect code '%s'. Type '/destroy' to generate a confirmation code.", codeArg), 5*time.Second)
 			return
 		}
 
@@ -1487,7 +1487,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		code := fmt.Sprintf("%02X%02X", b[0], b[1])
 		m.destroyCode = code
 		m.destroyRoom = room
-		m.setToast(fmt.Sprintf("⚠️ [WARN] To destroy #%s and wipe all history, type:  /destroy %s", room, code), 14*time.Second)
+		m.setToast(fmt.Sprintf("[WARN] To destroy #%s and wipe all history, type:  /destroy %s", room, code), 14*time.Second)
 
 	case "/autodelete", "/burn", "/ephemeral":
 		if len(parts) < 2 {
@@ -1509,7 +1509,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 				return
 			}
 			m.autoDeleteTTL = dur
-			m.addSystemMsg(fmt.Sprintf("[AUTODELETE] ⏱️ New messages will automatically self-destruct %s after delivery.", dur.Round(time.Second)))
+			m.addSystemMsg(fmt.Sprintf("[AUTODELETE] New messages will automatically self-destruct %s after delivery.", dur.Round(time.Second)))
 		}
 
 	case "/files", "/shared", "/vault", "/downloads":
@@ -1666,10 +1666,10 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		if len(parts) >= 3 {
 			pass := parts[2]
 			m.manager.SetEncryptionPassphrase(pass)
-			m.setToast(fmt.Sprintf("✨ [ROOM] Created & joined #%s ([AES-256] Encrypted)", newRoom), 5*time.Second)
+			m.setToast(fmt.Sprintf("[ROOM] Created & joined #%s ([AES-256] Encrypted)", newRoom), 5*time.Second)
 		} else {
 			m.manager.SetEncryptionPassphrase("")
-			m.setToast(fmt.Sprintf("✨ [ROOM] Created & joined room #%s", newRoom), 5*time.Second)
+			m.setToast(fmt.Sprintf("[ROOM] Created & joined room #%s", newRoom), 5*time.Second)
 		}
 
 	case "/join":
@@ -1687,10 +1687,10 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		if len(parts) >= 3 {
 			pass := parts[2]
 			m.manager.SetEncryptionPassphrase(pass)
-			m.setToast(fmt.Sprintf("🚀 [ROOM] Joined room #%s ([AES-256] Encrypted)", newRoom), 5*time.Second)
+			m.setToast(fmt.Sprintf("[ROOM] Joined room #%s ([AES-256] Encrypted)", newRoom), 5*time.Second)
 		} else {
 			m.manager.SetEncryptionPassphrase("")
-			m.setToast(fmt.Sprintf("🚀 [ROOM] Joined room #%s", newRoom), 5*time.Second)
+			m.setToast(fmt.Sprintf("[ROOM] Joined room #%s", newRoom), 5*time.Second)
 		}
 
 	case "/room", "/channel":
@@ -1765,7 +1765,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		if wsCfg.Repo != "" {
 			repoInfo = fmt.Sprintf("\n• Repository: %s", wsCfg.Repo)
 		}
-		m.addSystemMsg(fmt.Sprintf("[WORKSPACE] 🐙 Project Collab Room Initialized!\n• Config File: %s%s\n• Collab Room: #%s\n👉 Commit .termchat/room.json to git so teammates auto-join on 'git clone'!", path, repoInfo, wsCfg.Room))
+		m.addSystemMsg(fmt.Sprintf("[WORKSPACE] Project Collab Room Initialized!\n• Config File: %s%s\n• Collab Room: #%s\n• Commit .termchat/room.json to git so teammates auto-join on 'git clone'!", path, repoInfo, wsCfg.Room))
 
 	case "/diff", "/patch":
 		staged := len(parts) > 1 && (parts[1] == "staged" || parts[1] == "--staged" || parts[1] == "--cached")
@@ -1785,7 +1785,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			diffType = "Staged (Cached)"
 		}
 
-		cardMsg := fmt.Sprintf("📦 **[GIT PATCH #patch-%s]** %s\n• **Changes:** +%d / -%d in %d file(s) (`%s`)\n• **Apply:** Type `/apply %s` to apply this patch directly to your repository!\n```diff\n%s\n```",
+		cardMsg := fmt.Sprintf("[GIT PATCH #patch-%s] %s\n• Changes: +%d / -%d in %d file(s) (`%s`)\n• Apply: Type `/apply %s` to apply this patch directly to your repository!\n```diff\n%s\n```",
 			diffRes.PatchID, diffType, diffRes.Additions, diffRes.Deletions, len(diffRes.Files), filesList, diffRes.PatchID, diffRes.RawDiff)
 
 		m.messages = append(m.messages, ChatMessage{
@@ -1842,12 +1842,12 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			m.addSystemMsg(fmt.Sprintf("[GIT] %v", err))
 			return
 		}
-		m.addSystemMsg(fmt.Sprintf("[GIT] ✓ Applied patch #patch-%s cleanly to your local workspace! (%s)", patchID, msg))
+		m.addSystemMsg(fmt.Sprintf("[GIT] Applied patch #patch-%s cleanly to your local workspace! (%s)", patchID, msg))
 
 	case "/branch", "/branches":
 		if out, err := exec.Command("git", "branch", "--show-current").Output(); err == nil && len(out) > 0 {
 			curr := strings.TrimSpace(string(out))
-			m.addSystemMsg(fmt.Sprintf("🌿 Active Git Branch: %s", curr))
+			m.addSystemMsg(fmt.Sprintf("[GIT] Active Branch: %s", curr))
 		} else {
 			m.addSystemMsg("[GIT] Not inside a git repository.")
 		}
@@ -1865,7 +1865,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 				if chkErr != nil {
 					m.addSystemMsg(fmt.Sprintf("[GH] %v", chkErr))
 				} else {
-					m.addSystemMsg(fmt.Sprintf("🌿 Switched to PR #%d branch! (%s)", prNum, msg))
+					m.addSystemMsg(fmt.Sprintf("[GIT] Switched to PR #%d branch! (%s)", prNum, msg))
 				}
 				return
 			}
@@ -1877,7 +1877,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			m.addSystemMsg(fmt.Sprintf("[GIT] Failed to switch branch: %s", strings.TrimSpace(string(out))))
 			return
 		}
-		m.addSystemMsg(fmt.Sprintf("🌿 Switched to Git branch '%s'!", targetBranch))
+		m.addSystemMsg(fmt.Sprintf("[GIT] Switched to branch '%s'!", targetBranch))
 
 	case "/pr":
 		if len(parts) < 2 {
@@ -1895,7 +1895,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 				m.addSystemMsg(fmt.Sprintf("[GH] %v", err))
 				return
 			}
-			m.addSystemMsg(fmt.Sprintf("🌿 Switched to PR #%d branch! (%s)", prNum, msg))
+			m.addSystemMsg(fmt.Sprintf("[GIT] Switched to PR #%d branch! (%s)", prNum, msg))
 			return
 		}
 
@@ -2012,7 +2012,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			if len(pk) > 20 {
 				pk = pk[:10] + "..." + pk[len(pk)-10:]
 			}
-			m.addSystemMsg(fmt.Sprintf("🔑 **[DEVICE IDENTITY]**\n• **Nickname:** %s\n• **Ed25519 Fingerprint:** `ed25519:%s`\n• **Public Key:** `%s`", m.manager.LocalName, fp, pk))
+			m.addSystemMsg(fmt.Sprintf("**[DEVICE IDENTITY]**\n• **Nickname:** %s\n• **Ed25519 Fingerprint:** `ed25519:%s`\n• **Public Key:** `%s`", m.manager.LocalName, fp, pk))
 		} else {
 			m.addSystemMsg(fmt.Sprintf("User: %s (ID: %s)", m.manager.LocalName, m.manager.LocalID))
 		}
@@ -2032,7 +2032,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			m.qrContent = fmt.Sprintf("Invite Link for Room #%s:\n%s\n\n%s", roomName, link, qrCode)
 			m.showQR = true
 		} else {
-			m.addSystemMsg(fmt.Sprintf("🔗 **Room Invite Link:** %s", link))
+			m.addSystemMsg(fmt.Sprintf("**Room Invite Link:** %s", link))
 		}
 
 	case "/kick":
@@ -2041,7 +2041,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			return
 		}
 		target := parts[1]
-		m.addSystemMsg(fmt.Sprintf("🔨 [MOD] Kicked user '%s' from room.", target))
+		m.addSystemMsg(fmt.Sprintf("[MOD] Kicked user '%s' from room.", target))
 
 	case "/ban":
 		if len(parts) < 2 {
@@ -2054,7 +2054,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			reason = strings.Join(parts[2:], " ")
 		}
 		system.BanUser(target, target, reason)
-		m.addSystemMsg(fmt.Sprintf("🚫 [MOD] Banned '%s' (Reason: %s). Identity added to room banlist.", target, reason))
+		m.addSystemMsg(fmt.Sprintf("[MOD] Banned '%s' (Reason: %s). Identity added to room banlist.", target, reason))
 
 	case "/unban":
 		if len(parts) < 2 {
@@ -2063,7 +2063,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		}
 		target := parts[1]
 		if system.UnbanUser(target) {
-			m.addSystemMsg(fmt.Sprintf("✓ [MOD] Unbanned identity '%s'.", target))
+			m.addSystemMsg(fmt.Sprintf("[MOD] Unbanned identity '%s'.", target))
 		} else {
 			m.addSystemMsg(fmt.Sprintf("Identity '%s' not found in banlist.", target))
 		}
@@ -2071,11 +2071,11 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 	case "/banlist", "/bans":
 		bans := system.GetBanList()
 		if len(bans) == 0 {
-			m.addSystemMsg("🛡️ [MOD] Banlist is empty. No devices currently banned.")
+			m.addSystemMsg("[MOD] Banlist is empty. No devices currently banned.")
 			return
 		}
 		var lines []string
-		lines = append(lines, fmt.Sprintf("🛡️ **[ROOM BANLIST]** (%d banned)", len(bans)))
+		lines = append(lines, fmt.Sprintf("**[ROOM BANLIST]** (%d banned)", len(bans)))
 		for _, b := range bans {
 			lines = append(lines, fmt.Sprintf("• `%s` (%s) - %s (at %s)", b.IdentityFingerprint, b.Name, b.Reason, b.BannedAt.Format("Jan 02 15:04")))
 		}
@@ -2294,7 +2294,7 @@ func (m *Model) renderMessages() string {
 				rem := time.Until(msg.ExpiresAt)
 				if rem > 0 {
 					secs := int(rem.Seconds())
-					timerBadge = " " + lipgloss.NewStyle().Foreground(WarningColor).Bold(true).Render(fmt.Sprintf("[⏱️ %02d:%02d]", secs/60, secs%60))
+					timerBadge = " " + lipgloss.NewStyle().Foreground(WarningColor).Bold(true).Render(fmt.Sprintf("[TTL %02d:%02d]", secs/60, secs%60))
 				}
 			}
 
@@ -2404,8 +2404,6 @@ func (m *Model) refreshSharedFiles() {
 							fileName = l[start+1 : start+1+end]
 						}
 					}
-				} else if strings.HasPrefix(trimmed, "🔗 ") {
-					fileURL = strings.TrimSpace(strings.TrimPrefix(trimmed, "🔗 "))
 				} else if strings.HasPrefix(trimmed, ":: ") && strings.HasPrefix(strings.TrimPrefix(trimmed, ":: "), "http") {
 					fileURL = strings.TrimSpace(strings.TrimPrefix(trimmed, ":: "))
 				} else if strings.HasPrefix(trimmed, "• http://") || strings.HasPrefix(trimmed, "• https://") {

@@ -79,7 +79,7 @@ func main() {
 			_ = workspace.SaveConfig(path, wsCfg)
 		}
 		fmt.Printf("\n  ╔═══════════════════════════════════════════════════════╗\n")
-		fmt.Printf("  ║   🐙 Project Collab Room Initialized Successfully!    ║\n")
+		fmt.Printf("  ║      Project Collab Room Initialized Successfully     ║\n")
 		fmt.Printf("  ╚═══════════════════════════════════════════════════════╝\n\n")
 		fmt.Printf("  • Config File: %s\n", path)
 		if wsCfg.Repo != "" {
@@ -91,7 +91,7 @@ func main() {
 		} else {
 			fmt.Printf("  • Mode:        Cloud Relay (24/7 Global)\n")
 		}
-		fmt.Printf("\n  👉 Commit .termchat/room.json to git so collaborators auto-join on 'git clone'!\n\n")
+		fmt.Printf("\n  • Commit .termchat/room.json to git so collaborators auto-join on 'git clone'!\n\n")
 		os.Exit(0)
 	}
 

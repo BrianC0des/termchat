@@ -80,14 +80,14 @@ func (m *Model) View() string {
 			if hours > 0 {
 				timeStr = fmt.Sprintf("%02dh %02dm", hours, mins%60)
 			}
-			ttlBadge = " " + lipgloss.NewStyle().Foreground(WarningColor).Background(BgLight).Bold(true).Padding(0, 1).Render(fmt.Sprintf("⏳ %s", timeStr))
+			ttlBadge = " " + lipgloss.NewStyle().Foreground(WarningColor).Background(BgLight).Bold(true).Padding(0, 1).Render(fmt.Sprintf("[TTL: %s]", timeStr))
 		}
 	}
 
 	// Auto-delete / Disappearing message badge
 	var autoDeleteBadge string
 	if m.autoDeleteTTL > 0 {
-		autoDeleteBadge = " " + lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render(fmt.Sprintf("[⏱️ %s]", m.autoDeleteTTL))
+		autoDeleteBadge = " " + lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render(fmt.Sprintf("[AUTODELETE: %s]", m.autoDeleteTTL))
 	}
 
 	headerLeft := lipgloss.JoinHorizontal(
@@ -236,7 +236,7 @@ func (m *Model) View() string {
 			Bold(true).
 			Padding(0, 1).
 			Width(m.width).
-			Render(fmt.Sprintf("⚡ %s", m.toastMsg))
+			Render(fmt.Sprintf(":: %s", m.toastMsg))
 	}
 
 	var layout []string
@@ -399,9 +399,9 @@ func (m *Model) renderHelpView() string {
 		Height(boxHeight)
 
 	title := TitleStyle.Render(":: TERMCHAT COMMAND & KEYBOARD SHORTCUTS ::")
-	sectionDev := lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render("🐙 DEVELOPER COLLAB & GIT:")
-	sectionRoom := lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).Render("💬 ROOMS & MESSAGING:")
-	sectionFiles := lipgloss.NewStyle().Foreground(AccentColor).Bold(true).Render("📁 FILES & NAVIGATION:")
+	sectionDev := lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render(":: DEVELOPER COLLAB & GIT ::")
+	sectionRoom := lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).Render(":: ROOMS & MESSAGING ::")
+	sectionFiles := lipgloss.NewStyle().Foreground(AccentColor).Bold(true).Render(":: FILES & NAVIGATION ::")
 
 	content := fmt.Sprintf(`%s
 
