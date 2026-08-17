@@ -442,12 +442,12 @@ func (m *Model) renderHelpView() string {
 		HelpKeyStyle.Render("Ctrl+E / F4      "), HelpDescStyle.Render("Toggle Discord-style folding on code blocks"),
 
 		sectionRoom,
-		HelpKeyStyle.Render("/init [room]     "), HelpDescStyle.Render("Scaffold .termchat/room.json for team auto-join on clone"),
-		HelpKeyStyle.Render("/room <name> [pw]"), HelpDescStyle.Render("Join 24/7 cloud room with optional AES-256 password"),
-		HelpKeyStyle.Render("/invite / /qr    "), HelpDescStyle.Render("Generate 1-click room invite link & ASCII QR code"),
-		HelpKeyStyle.Render("/identity /whoami"), HelpDescStyle.Render("Show device Ed25519 cryptographic fingerprint"),
-		HelpKeyStyle.Render("/destroy confirm"), HelpDescStyle.Render("Instant self-destruct: zero RAM, purge history & disconnect"),
-		HelpKeyStyle.Render("/expire /autodel "), HelpDescStyle.Render("Room self-destruct countdown / disappearing messages"),
+		HelpKeyStyle.Render("/create [name] [pw]"), HelpDescStyle.Render("Create new cloud room with optional AES-256 password"),
+		HelpKeyStyle.Render("/join <name> [pw]  "), HelpDescStyle.Render("Join existing room or switch channels (/leave)"),
+		HelpKeyStyle.Render("/init [room]       "), HelpDescStyle.Render("Scaffold .termchat/room.json for team auto-join on clone"),
+		HelpKeyStyle.Render("/invite / /qr      "), HelpDescStyle.Render("Generate 1-click room invite link & ASCII QR code"),
+		HelpKeyStyle.Render("/destroy <code>    "), HelpDescStyle.Render("Room creator instant self-destruct: zero RAM & wipe"),
+		HelpKeyStyle.Render("/expire /autodel   "), HelpDescStyle.Render("Room self-destruct countdown / disappearing messages"),
 
 		sectionFiles,
 		HelpKeyStyle.Render("Ctrl+O / /browse "), HelpDescStyle.Render("Interactive visual file explorer to send files"),

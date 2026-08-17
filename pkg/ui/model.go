@@ -893,7 +893,7 @@ func (m *Model) handleTabComplete() {
 		cmdList := []string{
 			"/theme", "/themes", "/reply", "/status", "/afk", "/topic",
 			"/pin", "/pins", "/unpin", "/copy", "/files", "/browse",
-			"/clip", "/sidebar", "/clear", "/nick", "/room", "/init", "/repo", "/update",
+			"/clip", "/sidebar", "/clear", "/nick", "/create", "/join", "/leave", "/room", "/init", "/repo", "/update",
 			"/diff", "/patch", "/apply", "/branch", "/branches", "/checkout", "/switch",
 			"/pr", "/issue", "/ci", "/editor", "/compose",
 			"/identity", "/whoami", "/invite", "/kick", "/ban", "/unban", "/banlist",
@@ -1580,23 +1580,13 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		}
 
 	case "/leave", "/offline", "/lan":
-		m.manager.LeaveRoom()
-		var roomMsgs []ChatMessage
-		history := system.LoadHistory("", 60)
-		for _, h := range history {
-			roomMsgs = append(roomMsgs, ChatMessage{
-				SenderID:   h.SenderID,
-				SenderName: h.SenderName,
-				Content:    h.Content,
-				Timestamp:  h.Timestamp,
-				IsMe:       h.IsMe,
-				IsSystem:   h.IsSystem,
-				IsFile:     h.IsFile,
-			})
+		if m.manager.RoomName == "" {
+			m.setToast("[LAN] Already in Offline Local Wi-Fi mode.", 3*time.Second)
+			return
 		}
-		m.messages = roomMsgs
-		m.viewport.SetContent(m.renderMessages())
-		m.addSystemMsg("[LAN] Switched to Offline Local Wi-Fi (LAN Direct Mode).")
+		m.manager.LeaveRoom()
+		m.SwitchRoomHistory("")
+		m.setToast("[LAN] Left room. Switched to Offline Local Wi-Fi mode.", 4*time.Second)
 
 	case "/mode":
 		if len(parts) < 2 {
@@ -1661,37 +1651,9 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			}
 		}
 
-	case "/room", "/create", "/join", "/channel":
+	case "/create":
 		if len(parts) < 2 {
-			if m.manager.RoomName != "" {
-				lockInfo := ""
-				if m.manager.EncryptionKey != nil {
-					lockInfo = " ([AES-256] Encrypted)"
-				}
-				m.addSystemMsg(fmt.Sprintf("[ROOM] Currently in Room: #%s%s", m.manager.RoomName, lockInfo))
-			} else {
-				m.addSystemMsg("Currently in: [LAN] Offline Local Wi-Fi\nUsage: /room <room_name> [optional_password]\nExample: /room squad secret123\nTo leave: /leave")
-			}
-			return
-		}
-		if parts[1] == "leave" || parts[1] == "exit" {
-			m.manager.LeaveRoom()
-			var roomMsgs []ChatMessage
-			history := system.LoadHistory("", 60)
-			for _, h := range history {
-				roomMsgs = append(roomMsgs, ChatMessage{
-					SenderID:   h.SenderID,
-					SenderName: h.SenderName,
-					Content:    h.Content,
-					Timestamp:  h.Timestamp,
-					IsMe:       h.IsMe,
-					IsSystem:   h.IsSystem,
-					IsFile:     h.IsFile,
-				})
-			}
-			m.messages = roomMsgs
-			m.viewport.SetContent(m.renderMessages())
-			m.addSystemMsg("[LAN] Left room. Switched to Offline Local Wi-Fi mode.")
+			m.addSystemMsg("Usage: /create <room_name> [optional_password]\nExample: /create squad secret123")
 			return
 		}
 		newRoom := parts[1]
@@ -1699,34 +1661,71 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		if relay == "" {
 			relay = "wss://termchat-o51d.onrender.com/ws"
 		}
-
-		// Load isolated history for this room
-		var roomMsgs []ChatMessage
-		history := system.LoadHistory(newRoom, 60)
-		for _, h := range history {
-			roomMsgs = append(roomMsgs, ChatMessage{
-				SenderID:   h.SenderID,
-				SenderName: h.SenderName,
-				Content:    h.Content,
-				Timestamp:  h.Timestamp,
-				IsMe:       h.IsMe,
-				IsSystem:   h.IsSystem,
-				IsFile:     h.IsFile,
-			})
-		}
-		m.messages = roomMsgs
-		m.viewport.SetContent(m.renderMessages())
-
+		m.SwitchRoomHistory(newRoom)
 		m.manager.ConnectRelay(relay, newRoom)
-
-		// If password is provided in the same command: /room <name> <password>
 		if len(parts) >= 3 {
 			pass := parts[2]
 			m.manager.SetEncryptionPassphrase(pass)
-			m.addSystemMsg(fmt.Sprintf("[ROOM] Switched to Room #%s with [AES-256] Encryption!", newRoom))
+			m.setToast(fmt.Sprintf("✨ [ROOM] Created & joined #%s ([AES-256] Encrypted)", newRoom), 5*time.Second)
 		} else {
 			m.manager.SetEncryptionPassphrase("")
-			m.addSystemMsg(fmt.Sprintf("[ROOM] Switched to Room #%s", newRoom))
+			m.setToast(fmt.Sprintf("✨ [ROOM] Created & joined room #%s", newRoom), 5*time.Second)
+		}
+
+	case "/join":
+		if len(parts) < 2 {
+			m.addSystemMsg("Usage: /join <room_name> [optional_password]\nExample: /join squad secret123")
+			return
+		}
+		newRoom := parts[1]
+		relay := m.manager.RelayURL
+		if relay == "" {
+			relay = "wss://termchat-o51d.onrender.com/ws"
+		}
+		m.SwitchRoomHistory(newRoom)
+		m.manager.ConnectRelay(relay, newRoom)
+		if len(parts) >= 3 {
+			pass := parts[2]
+			m.manager.SetEncryptionPassphrase(pass)
+			m.setToast(fmt.Sprintf("🚀 [ROOM] Joined room #%s ([AES-256] Encrypted)", newRoom), 5*time.Second)
+		} else {
+			m.manager.SetEncryptionPassphrase("")
+			m.setToast(fmt.Sprintf("🚀 [ROOM] Joined room #%s", newRoom), 5*time.Second)
+		}
+
+	case "/room", "/channel":
+		if len(parts) < 2 {
+			if m.manager.RoomName != "" {
+				lockInfo := ""
+				if m.manager.EncryptionKey != nil {
+					lockInfo = " ([AES-256] Encrypted)"
+				}
+				m.setToast(fmt.Sprintf("[ROOM] Currently in: #%s%s (Use /leave to exit)", m.manager.RoomName, lockInfo), 5*time.Second)
+			} else {
+				m.setToast("Currently in: [LAN] Offline Local Wi-Fi (Use /create <room> or /join <room>)", 5*time.Second)
+			}
+			return
+		}
+		if parts[1] == "leave" || parts[1] == "exit" {
+			m.manager.LeaveRoom()
+			m.SwitchRoomHistory("")
+			m.setToast("[LAN] Left room. Switched to Offline Local Wi-Fi mode.", 4*time.Second)
+			return
+		}
+		newRoom := parts[1]
+		relay := m.manager.RelayURL
+		if relay == "" {
+			relay = "wss://termchat-o51d.onrender.com/ws"
+		}
+		m.SwitchRoomHistory(newRoom)
+		m.manager.ConnectRelay(relay, newRoom)
+		if len(parts) >= 3 {
+			pass := parts[2]
+			m.manager.SetEncryptionPassphrase(pass)
+			m.setToast(fmt.Sprintf("[ROOM] Switched to Room #%s ([AES-256] Encrypted)", newRoom), 5*time.Second)
+		} else {
+			m.manager.SetEncryptionPassphrase("")
+			m.setToast(fmt.Sprintf("[ROOM] Switched to Room #%s", newRoom), 5*time.Second)
 		}
 
 	case "/init", "/repo", "/workspace":
