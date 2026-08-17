@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -38,6 +39,32 @@ type SharedFileItem struct {
 	URL      string
 	Sender   string
 	Time     time.Time
+}
+
+var userColorPalette = []lipgloss.Color{
+	lipgloss.Color("#00E5FF"), // Vivid Cyan
+	lipgloss.Color("#50FA7B"), // Mint Green
+	lipgloss.Color("#FF79C6"), // Bright Pink
+	lipgloss.Color("#BD93F9"), // Lavender Purple
+	lipgloss.Color("#FFB86C"), // Tangerine Orange
+	lipgloss.Color("#F1FA8C"), // Lemon Yellow
+	lipgloss.Color("#8BE9FD"), // Sky Blue
+	lipgloss.Color("#FF6E6E"), // Coral Red
+	lipgloss.Color("#69FF94"), // Spring Green
+	lipgloss.Color("#D6ACFF"), // Pastel Lilac
+}
+
+func getUserNameStyle(name string, isMe bool) lipgloss.Style {
+	if isMe {
+		return SenderMeStyle
+	}
+	if name == "" {
+		return SenderPeerStyle
+	}
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(name))
+	colorIdx := int(h.Sum32()) % len(userColorPalette)
+	return lipgloss.NewStyle().Foreground(userColorPalette[colorIdx]).Bold(true)
 }
 
 type Model struct {
@@ -594,8 +621,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textInput, tiCmd = m.textInput.Update(msg)
 	}
 
-	// Forward events to viewport
-	m.viewport, vpCmd = m.viewport.Update(msg)
+	// Forward non-key events to viewport (mouse, resize, ticks)
+	// Keystrokes are handled exclusively by textInput or dedicated KeyMsg bindings
+	switch msg.(type) {
+	case tea.KeyMsg:
+		// Do not pass typing keys to viewport to prevent accidental scrolling while typing words!
+	default:
+		m.viewport, vpCmd = m.viewport.Update(msg)
+	}
 
 	cmds = append(cmds, tiCmd, vpCmd)
 	return m, tea.Batch(cmds...)
@@ -1566,8 +1599,12 @@ func (m *Model) renderMessages() string {
 	}
 
 	msgIdx := 1
+	var lastSender string
+	var lastTime time.Time
+
 	for _, msg := range m.messages {
 		if msg.IsSystem {
+			lastSender = ""
 			timeStr := TimeStyle.Render(msg.Timestamp.Format("15:04:05"))
 			if msg.IsFile {
 				sb.WriteString(fmt.Sprintf("%s %s\n\n", timeStr, FileNoticeStyle.Width(wrapWidth).Render(msg.Content)))
@@ -1575,6 +1612,11 @@ func (m *Model) renderMessages() string {
 				sb.WriteString(fmt.Sprintf("%s %s %s\n\n", timeStr, SenderSystemStyle.Render("[SYS] >"), bodyStyle.Render(msg.Content)))
 			}
 		} else {
+			isGrouped := false
+			if lastSender != "" && msg.SenderName == lastSender && msg.ReplyToNum == 0 && msg.Timestamp.Sub(lastTime) < 90*time.Second {
+				isGrouped = true
+			}
+
 			if msg.ReplyToNum > 0 {
 				replyQuote := lipgloss.NewStyle().
 					Foreground(MutedColor).
@@ -1593,7 +1635,6 @@ func (m *Model) renderMessages() string {
 					timerBadge = " " + lipgloss.NewStyle().Foreground(WarningColor).Bold(true).Render(fmt.Sprintf("[⏱️ %02d:%02d]", secs/60, secs%60))
 				}
 			}
-			prefix := fmt.Sprintf("%s %s%s", timeStr, numBadge, timerBadge)
 
 			renderedContent := msg.Content
 			myMention := "@" + m.manager.LocalName
@@ -1604,13 +1645,21 @@ func (m *Model) renderMessages() string {
 				renderedContent = bodyStyle.Render(renderedContent)
 			}
 
-			if msg.IsMe {
-				nameTag := SenderMeStyle.Render(fmt.Sprintf("[%s]", msg.SenderName))
-				sb.WriteString(fmt.Sprintf("%s %s: %s\n\n", prefix, nameTag, renderedContent))
+			if isGrouped {
+				// Clean indented continuation: don't repeat username header
+				continuationPrefix := fmt.Sprintf("   %s %s%s %s", timeStr, numBadge, timerBadge, lipgloss.NewStyle().Foreground(MutedColor).Render("│"))
+				sb.WriteString(fmt.Sprintf("%s %s\n", continuationPrefix, renderedContent))
 			} else {
-				nameTag := SenderPeerStyle.Render(fmt.Sprintf("[%s]", msg.SenderName))
-				sb.WriteString(fmt.Sprintf("%s %s: %s\n\n", prefix, nameTag, renderedContent))
+				if msgIdx > 1 {
+					sb.WriteString("\n")
+				}
+				prefix := fmt.Sprintf("%s %s%s", timeStr, numBadge, timerBadge)
+				nameTag := getUserNameStyle(msg.SenderName, msg.IsMe).Render(fmt.Sprintf("[%s]", msg.SenderName))
+				sb.WriteString(fmt.Sprintf("%s %s: %s\n", prefix, nameTag, renderedContent))
 			}
+
+			lastSender = msg.SenderName
+			lastTime = msg.Timestamp
 			msgIdx++
 		}
 	}
@@ -1755,11 +1804,13 @@ func (m *Model) recalculateViewport() {
 
 	if !m.ready {
 		m.viewport = viewport.New(vpWidth, vpHeight)
+		m.viewport.KeyMap = viewport.KeyMap{}
 		m.viewport.SetContent(m.renderMessages())
 		m.ready = true
 	} else {
 		m.viewport.Width = vpWidth
 		m.viewport.Height = vpHeight
+		m.viewport.KeyMap = viewport.KeyMap{}
 		m.viewport.SetContent(m.renderMessages())
 	}
 }
