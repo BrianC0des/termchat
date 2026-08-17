@@ -273,6 +273,25 @@ func NewModel(mgr *network.Manager) *Model {
 	return m
 }
 
+func (m *Model) SwitchRoomHistory(roomName string) {
+	var roomMsgs []ChatMessage
+	history := system.LoadHistory(roomName, 60)
+	for _, h := range history {
+		roomMsgs = append(roomMsgs, ChatMessage{
+			SenderID:   h.SenderID,
+			SenderName: h.SenderName,
+			Content:    h.Content,
+			Timestamp:  h.Timestamp,
+			IsMe:       h.IsMe,
+			IsSystem:   h.IsSystem,
+			IsFile:     h.IsFile,
+		})
+	}
+	m.messages = roomMsgs
+	m.viewport.SetContent(m.renderMessages())
+	m.viewport.GotoBottom()
+}
+
 func (m *Model) SetRoomTTL(d time.Duration) {
 	if d > 0 {
 		m.hasRoomExpiry = true

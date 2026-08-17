@@ -141,6 +141,7 @@ func main() {
 
 	// 6. Connect to Cloud Room or Auto-Join Project Workspace
 	if *roomFlag != "" {
+		model.SwitchRoomHistory(*roomFlag)
 		mgr.ConnectRelay(*relayFlag, *roomFlag)
 	} else if wsCfg, _, err := workspace.FindWorkspace(""); err == nil && wsCfg.AutoConnect && wsCfg.Room != "" {
 		relayURL := *relayFlag
@@ -150,6 +151,7 @@ func main() {
 		if *passFlag == "" && wsCfg.Passphrase != "" {
 			mgr.SetEncryptionPassphrase(wsCfg.Passphrase)
 		}
+		model.SwitchRoomHistory(wsCfg.Room)
 		mgr.ConnectRelay(relayURL, wsCfg.Room)
 	}
 
