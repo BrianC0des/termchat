@@ -115,12 +115,9 @@ type model struct {
 func initialModel() model {
 	defaultPlatforms := []platformStatus{
 		{Name: "Linux PC (x86_64)", Asset: "termchat-linux-amd64.tar.zst", Status: "BUILDING", SizeMB: 0},
-		{Name: "Linux ARM64", Asset: "termchat-linux-arm64.tar.zst", Status: "BUILDING", SizeMB: 0},
-		{Name: "macOS (Apple Silicon)", Asset: "termchat-mac-apple-silicon.tar.zst", Status: "BUILDING", SizeMB: 0},
-		{Name: "macOS (Intel)", Asset: "termchat-mac-intel.tar.zst", Status: "BUILDING", SizeMB: 0},
-		{Name: "Android / Termux (ARM64)", Asset: "termchat-android-arm64.tar.zst", Status: "BUILDING", SizeMB: 0},
-		{Name: "Android / Termux (ARM32)", Asset: "termchat-android-arm.tar.zst", Status: "BUILDING", SizeMB: 0},
 		{Name: "Windows (64-bit .exe)", Asset: "termchat-windows.zip", Status: "BUILDING", SizeMB: 0},
+		{Name: "Android / Termux (ARM64)", Asset: "termchat-android-arm64.tar.zst", Status: "BUILDING", SizeMB: 0},
+		{Name: "macOS (Apple Silicon)", Asset: "termchat-mac-apple-silicon.tar.zst", Status: "BUILDING", SizeMB: 0},
 	}
 
 	return model{
@@ -206,12 +203,9 @@ func fetchReleaseDataCmd() tea.Cmd {
 
 		platforms := []platformStatus{
 			{Name: "Linux PC (x86_64)", Asset: "termchat-linux-amd64.tar.zst"},
-			{Name: "Linux ARM64", Asset: "termchat-linux-arm64.tar.zst"},
-			{Name: "macOS (Apple Silicon)", Asset: "termchat-mac-apple-silicon.tar.zst"},
-			{Name: "macOS (Intel)", Asset: "termchat-mac-intel.tar.zst"},
-			{Name: "Android / Termux (ARM64)", Asset: "termchat-android-arm64.tar.zst"},
-			{Name: "Android / Termux (ARM32)", Asset: "termchat-android-arm.tar.zst"},
 			{Name: "Windows (64-bit .exe)", Asset: "termchat-windows.zip"},
+			{Name: "Android / Termux (ARM64)", Asset: "termchat-android-arm64.tar.zst"},
+			{Name: "macOS (Apple Silicon)", Asset: "termchat-mac-apple-silicon.tar.zst"},
 		}
 
 		for i, p := range platforms {
