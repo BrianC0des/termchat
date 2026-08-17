@@ -1916,22 +1916,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			return
 		}
 
-		stateIcon := "🟢"
-		if pr.State == "MERGED" {
-			stateIcon = "🟣"
-		} else if pr.State == "CLOSED" {
-			stateIcon = "🔴"
-		}
-
-		reviewStr := "Needs Review"
-		if pr.ReviewState == "APPROVED" {
-			reviewStr = "✅ Approved"
-		} else if pr.ReviewState == "CHANGES_REQUESTED" {
-			reviewStr = "⚠️ Changes Requested"
-		}
-
-		cardMsg := fmt.Sprintf("🐙 **[PULL REQUEST #%d]** %s\n• **Status:** %s %s • **Review:** %s\n• **Branches:** `🌿 %s` ➔ `%s`\n• **Changes:** +%d / -%d • Author: @%s\n• **Action:** Type `/checkout #%d` to checkout locally!\n• URL: %s",
-			pr.Number, pr.Title, stateIcon, pr.State, reviewStr, pr.HeadRefName, pr.BaseRefName, pr.Additions, pr.Deletions, pr.Author, pr.Number, pr.URL)
+		cardMsg := ghbridge.FormatPRCard(pr)
 
 		m.messages = append(m.messages, ChatMessage{
 			SenderID:   m.manager.LocalID,
@@ -1973,13 +1958,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			return
 		}
 
-		stateIcon := "🟢"
-		if iss.State == "CLOSED" {
-			stateIcon = "🟣"
-		}
-
-		cardMsg := fmt.Sprintf("🐛 **[ISSUE #%d]** %s\n• **Status:** %s %s • **Author:** @%s\n• **Link:** %s",
-			iss.Number, iss.Title, stateIcon, iss.State, iss.Author, iss.URL)
+		cardMsg := ghbridge.FormatIssueCard(iss)
 
 		m.messages = append(m.messages, ChatMessage{
 			SenderID:   m.manager.LocalID,

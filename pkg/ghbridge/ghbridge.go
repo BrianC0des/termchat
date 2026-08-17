@@ -10,30 +10,34 @@ import (
 
 // PRDetails holds key pull request metadata
 type PRDetails struct {
-	Number        int      `json:"number"`
-	Title         string   `json:"title"`
-	State         string   `json:"state"`
-	Author        string   `json:"author"`
-	HeadRefName   string   `json:"headRefName"`
-	BaseRefName   string   `json:"baseRefName"`
-	Additions     int      `json:"additions"`
-	Deletions     int      `json:"deletions"`
-	ReviewState   string   `json:"reviewDecision"`
-	URL           string   `json:"url"`
+	Number      int      `json:"number"`
+	Title       string   `json:"title"`
+	State       string   `json:"state"`
+	Author      string   `json:"author"`
+	HeadRefName string   `json:"headRefName"`
+	BaseRefName string   `json:"baseRefName"`
+	Additions   int      `json:"additions"`
+	Deletions   int      `json:"deletions"`
+	ReviewState string   `json:"reviewDecision"`
+	Body        string   `json:"body"`
+	Labels      []string `json:"labels"`
+	URL         string   `json:"url"`
 }
 
 // IssueDetails holds key issue metadata
 type IssueDetails struct {
-	Number int    `json:"number"`
-	Title  string `json:"title"`
-	State  string `json:"state"`
-	Author string `json:"author"`
-	URL    string `json:"url"`
+	Number int      `json:"number"`
+	Title  string   `json:"title"`
+	State  string   `json:"state"`
+	Author string   `json:"author"`
+	Body   string   `json:"body"`
+	Labels []string `json:"labels"`
+	URL    string   `json:"url"`
 }
 
 // FetchPR queries GitHub CLI for PR info
 func FetchPR(repo string, prNum int) (*PRDetails, error) {
-	args := []string{"pr", "view", strconv.Itoa(prNum), "--json", "number,title,state,author,headRefName,baseRefName,additions,deletions,reviewDecision,url"}
+	args := []string{"pr", "view", strconv.Itoa(prNum), "--json", "number,title,state,author,headRefName,baseRefName,additions,deletions,reviewDecision,body,labels,url"}
 	if repo != "" {
 		args = append(args, "-R", repo)
 	}
@@ -56,11 +60,20 @@ func FetchPR(repo string, prNum int) (*PRDetails, error) {
 		Additions      int    `json:"additions"`
 		Deletions      int    `json:"deletions"`
 		ReviewDecision string `json:"reviewDecision"`
+		Body           string `json:"body"`
+		Labels         []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
 		URL            string `json:"url"`
 	}
 
 	if err := json.Unmarshal(out, &raw); err != nil {
 		return nil, err
+	}
+
+	var labelNames []string
+	for _, l := range raw.Labels {
+		labelNames = append(labelNames, l.Name)
 	}
 
 	return &PRDetails{
@@ -73,13 +86,15 @@ func FetchPR(repo string, prNum int) (*PRDetails, error) {
 		Additions:   raw.Additions,
 		Deletions:   raw.Deletions,
 		ReviewState: raw.ReviewDecision,
+		Body:        raw.Body,
+		Labels:      labelNames,
 		URL:         raw.URL,
 	}, nil
 }
 
 // FetchIssue queries GitHub CLI for issue info
 func FetchIssue(repo string, issueNum int) (*IssueDetails, error) {
-	args := []string{"issue", "view", strconv.Itoa(issueNum), "--json", "number,title,state,author,url"}
+	args := []string{"issue", "view", strconv.Itoa(issueNum), "--json", "number,title,state,author,body,labels,url"}
 	if repo != "" {
 		args = append(args, "-R", repo)
 	}
@@ -97,6 +112,10 @@ func FetchIssue(repo string, issueNum int) (*IssueDetails, error) {
 		Author struct {
 			Login string `json:"login"`
 		} `json:"author"`
+		Body   string `json:"body"`
+		Labels []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
 		URL string `json:"url"`
 	}
 
@@ -104,11 +123,18 @@ func FetchIssue(repo string, issueNum int) (*IssueDetails, error) {
 		return nil, err
 	}
 
+	var labelNames []string
+	for _, l := range raw.Labels {
+		labelNames = append(labelNames, l.Name)
+	}
+
 	return &IssueDetails{
 		Number: raw.Number,
 		Title:  raw.Title,
 		State:  raw.State,
 		Author: raw.Author.Login,
+		Body:   raw.Body,
+		Labels: labelNames,
 		URL:    raw.URL,
 	}, nil
 }
@@ -164,4 +190,48 @@ func FetchCIStatus(repo, branch string) (string, error) {
 
 	return fmt.Sprintf("%s **CI Status (%s @ %s):** %s (%s)\n• Workflow: %s\n• URL: %s",
 		icon, r.Name, r.HeadBranch, statusStr, r.Conclusion, r.Name, r.URL), nil
+}
+
+// FormatIssueCard formats an Issue into a clean, foldable card
+func FormatIssueCard(iss *IssueDetails) string {
+	stateIcon := "🟢 OPEN"
+	if strings.ToUpper(iss.State) == "CLOSED" {
+		stateIcon = "🟣 CLOSED"
+	}
+
+	labelsStr := ""
+	if len(iss.Labels) > 0 {
+		labelsStr = fmt.Sprintf(" • Labels: [%s]", strings.Join(iss.Labels, ", "))
+	}
+
+	bodyContent := strings.TrimSpace(iss.Body)
+	if bodyContent == "" {
+		bodyContent = "(No description provided)"
+	}
+
+	return fmt.Sprintf("```github-issue\n🐛 [ISSUE #%d] %s\n• Status: %s • Author: @%s%s\n• Link: %s\n──────────────────────────────────────────────────────────\n%s\n```",
+		iss.Number, iss.Title, stateIcon, iss.Author, labelsStr, iss.URL, bodyContent)
+}
+
+// FormatPRCard formats a PR into a clean, foldable card
+func FormatPRCard(pr *PRDetails) string {
+	stateIcon := "🟢 OPEN"
+	if strings.ToUpper(pr.State) == "MERGED" {
+		stateIcon = "🟣 MERGED"
+	} else if strings.ToUpper(pr.State) == "CLOSED" {
+		stateIcon = "🔴 CLOSED"
+	}
+
+	reviewStr := ""
+	if pr.ReviewState != "" {
+		reviewStr = fmt.Sprintf(" • Review: %s", pr.ReviewState)
+	}
+
+	bodyContent := strings.TrimSpace(pr.Body)
+	if bodyContent == "" {
+		bodyContent = "(No description provided)"
+	}
+
+	return fmt.Sprintf("```github-pr\n🐙 [PR #%d] %s\n• Status: %s%s • Author: @%s\n• Branch: %s ➔ %s (+%d/-%d)\n• Link: %s\n──────────────────────────────────────────────────────────\n%s\n```",
+		pr.Number, pr.Title, stateIcon, reviewStr, pr.Author, pr.HeadRefName, pr.BaseRefName, pr.Additions, pr.Deletions, pr.URL, bodyContent)
 }
