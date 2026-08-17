@@ -1,4 +1,4 @@
-name: Release
+name: Release TermChat
 
 on:
   push:
@@ -25,7 +25,7 @@ jobs:
       - name: Install Build Tools (zstd, zip, upx)
         run: |
           sudo apt-get update
-          sudo apt-get install -y zstd zip upx
+          sudo apt-get install -y zstd zip upx python3-pip
 
       - name: Compile 4 Core Platforms
         run: |
@@ -68,11 +68,30 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Sync to Hugging Face Dataset Mirror
-        if: env.HF_TOKEN != ''
+      - name: Sync to Hugging Face Cloudflare Global CDN
+        if: ${{ env.HF_TOKEN != '' }}
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          pip install -q -U "huggingface_hub[cli]"
-          huggingface-cli upload BrianC0des/termchat-releases dist/ --repo-type=dataset --token="$HF_TOKEN" || true
-
+          pip install --upgrade huggingface_hub
+          python3 -c "
+          import os
+          from huggingface_hub import HfApi
+          token = os.environ.get('HF_TOKEN')
+          if token:
+              api = HfApi(token=token)
+              user_info = api.whoami()
+              username = user_info.get('name', 'BrianC0des')
+              repo_id = f'{username}/termchat-releases'
+              print(f'Syncing to Hugging Face repo: {repo_id}')
+              try:
+                  api.create_repo(repo_id=repo_id, repo_type='dataset', private=False, exist_ok=True)
+              except Exception as e:
+                  print(f'HF Repo check: {e}')
+              api.upload_folder(
+                  folder_path='dist',
+                  repo_id=repo_id,
+                  repo_type='dataset'
+              )
+              print(f'Successfully published to https://huggingface.co/datasets/{repo_id}!')
+          "
