@@ -44,9 +44,8 @@ jobs:
           CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -ldflags="-s -w" -o dist/termchat-android-arm64 .
           CGO_ENABLED=0 GOOS=linux GOARCH=arm go build -ldflags="-s -w" -o dist/termchat-android-arm .
 
-          # Apply UPX compression to reduce binary footprint by 65%
+          # Apply UPX compression to Linux binaries (skip Windows Go PE to avoid header corruption)
           upx --best --lzma dist/termchat-linux-amd64 || true
-          upx --best --lzma dist/termchat-windows.exe || true
           upx --best --lzma dist/termchat-android-arm || true
 
           # Create Pacman-style Zstandard compressed archives (.tar.zst) & Gzip (.tar.gz)

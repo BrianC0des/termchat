@@ -38,11 +38,10 @@ CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -ldflags="-s -w" -o dist/termch
 echo "[TERMUX] Building for Android / Termux (ARM 32-bit)..."
 CGO_ENABLED=0 GOOS=linux GOARCH=arm go build -ldflags="-s -w" -o dist/termchat-android-arm .
 
-# 5. Apply UPX compression if installed
+# 5. Apply UPX compression if installed (Linux only - UPX on Windows x64 Go PE corrupts headers)
 if command -v upx >/dev/null 2>&1; then
-    echo "[UPX] Applying UPX high-ratio compression..."
+    echo "[UPX] Applying UPX compression to Linux binaries..."
     upx --best --lzma dist/termchat-linux-amd64 2>/dev/null || true
-    upx --best --lzma dist/termchat-windows.exe 2>/dev/null || true
     upx --best --lzma dist/termchat-android-arm 2>/dev/null || true
 fi
 
