@@ -1641,11 +1641,10 @@ func (m *Model) renderMessages() string {
 
 		if msg.IsSystem {
 			lastSender = ""
-			timeStr := TimeStyle.Render(msg.Timestamp.Format("15:04:05"))
 			if msg.IsFile {
-				sb.WriteString(fmt.Sprintf("%s %s\n\n", timeStr, FileNoticeStyle.Width(wrapWidth).Render(msg.Content)))
+				sb.WriteString(fmt.Sprintf("%s\n\n", FileNoticeStyle.Width(wrapWidth).Render(msg.Content)))
 			} else {
-				sb.WriteString(fmt.Sprintf("%s %s %s\n\n", timeStr, SenderSystemStyle.Render("[SYS] >"), bodyStyle.Render(msg.Content)))
+				sb.WriteString(fmt.Sprintf("%s %s\n\n", SenderSystemStyle.Render("[SYS] >"), bodyStyle.Render(msg.Content)))
 			}
 		} else {
 			isGrouped := false
@@ -1662,7 +1661,6 @@ func (m *Model) renderMessages() string {
 			}
 
 			numBadge := lipgloss.NewStyle().Foreground(MutedColor).Render(fmt.Sprintf("#%d", msgIdx))
-			timeStr := TimeStyle.Render(msg.Timestamp.Format("15:04:05"))
 			var timerBadge string
 			if !msg.ExpiresAt.IsZero() {
 				rem := time.Until(msg.ExpiresAt)
@@ -1682,14 +1680,14 @@ func (m *Model) renderMessages() string {
 			}
 
 			if isGrouped {
-				// Clean indented continuation: don't repeat username header
-				continuationPrefix := fmt.Sprintf("   %s %s%s %s", timeStr, numBadge, timerBadge, lipgloss.NewStyle().Foreground(MutedColor).Render("│"))
+				// Clean indented continuation: only message index and vertical guide
+				continuationPrefix := fmt.Sprintf("   %s%s %s", numBadge, timerBadge, lipgloss.NewStyle().Foreground(MutedColor).Render("│"))
 				sb.WriteString(fmt.Sprintf("%s %s\n", continuationPrefix, renderedContent))
 			} else {
 				if msgIdx > 1 && !lastTime.IsZero() && msg.Timestamp.Sub(lastTime) < 5*time.Minute {
 					sb.WriteString("\n")
 				}
-				prefix := fmt.Sprintf("%s %s%s", timeStr, numBadge, timerBadge)
+				prefix := fmt.Sprintf("%s%s", numBadge, timerBadge)
 				nameTag := getUserNameStyle(msg.SenderName, msg.IsMe).Render(fmt.Sprintf("[%s]", msg.SenderName))
 				sb.WriteString(fmt.Sprintf("%s %s: %s\n", prefix, nameTag, renderedContent))
 			}
