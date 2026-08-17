@@ -48,6 +48,9 @@ func getRoomHistoryPath(room string) string {
 }
 
 func AppendHistory(room string, entry HistoryEntry) {
+	if entry.IsSystem {
+		return // Never save system messages to chat history logs
+	}
 	path := getRoomHistoryPath(room)
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
@@ -74,7 +77,9 @@ func LoadHistory(room string, limit int) []HistoryEntry {
 	for scanner.Scan() {
 		var entry HistoryEntry
 		if err := json.Unmarshal(scanner.Bytes(), &entry); err == nil {
-			entries = append(entries, entry)
+			if !entry.IsSystem {
+				entries = append(entries, entry)
+			}
 		}
 	}
 

@@ -734,25 +734,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !msg.joined {
 				action = "left"
 			}
-			m.messages = append(m.messages, ChatMessage{
-				SenderName: "SYSTEM",
-				Content:    fmt.Sprintf("[NET] %s has %s", msg.name, action),
-				Timestamp:  time.Now(),
-				IsSystem:   true,
-			})
+			m.setToast(fmt.Sprintf("[NET] %s has %s", msg.name, action), 4*time.Second)
 		}
-		m.viewport.SetContent(m.renderMessages())
-		m.viewport.GotoBottom()
 
 	case systemNoticeMsg:
-		m.messages = append(m.messages, ChatMessage{
-			SenderName: "SYSTEM",
-			Content:    msg.text,
-			Timestamp:  time.Now(),
-			IsSystem:   true,
-		})
-		m.viewport.SetContent(m.renderMessages())
-		m.viewport.GotoBottom()
+		m.setToast(msg.text, 5*time.Second)
 
 	case fileProgressMsg:
 		p := msg.progress
@@ -782,7 +768,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pastedSnippets[tokenKey] = text
 			m.textInput.SetValue(tokenKey)
 			m.textInput.SetCursor(len(tokenKey))
-			m.addSystemMsg("[EDITOR] ✓ Content loaded into input buffer. Press Enter to send!")
+			m.setToast("[EDITOR] ✓ Content loaded into input buffer. Press Enter to send!", 4*time.Second)
 		}
 		return m, nil
 
@@ -797,23 +783,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case fileReceivedMsg:
-		notice := fmt.Sprintf("[RECV] Received '%s' (%s) from %s\n   [DIR] Saved to: %s", msg.fileName, network.FormatBytes(msg.size), msg.senderName, msg.savedPath)
-		m.messages = append(m.messages, ChatMessage{
-			SenderName: "SYSTEM",
-			Content:    notice,
-			Timestamp:  time.Now(),
-			IsSystem:   true,
-			IsFile:     true,
-		})
-		system.AppendHistory(m.manager.RoomName, system.HistoryEntry{
-			SenderName: msg.senderName,
-			Content:    notice,
-			Timestamp:  time.Now(),
-			IsSystem:   true,
-			IsFile:     true,
-		})
-		m.viewport.SetContent(m.renderMessages())
-		m.viewport.GotoBottom()
+		m.setToast(fmt.Sprintf("✓ [RECV] Received '%s' (%s) from %s", msg.fileName, network.FormatBytes(msg.size), msg.senderName), 6*time.Second)
 	}
 
 	if !m.filePicker.Active {
@@ -2182,20 +2152,7 @@ func (m *Model) setToast(text string, dur time.Duration) {
 }
 
 func (m *Model) addSystemMsg(text string) {
-	// If it is a short single-line status notification (like nick, theme, etc), display as status toast bar
-	if !strings.Contains(text, "\n") && len(text) < 85 && !strings.Contains(text, "Usage:") && !strings.Contains(text, "[WORKSPACE]") && !strings.Contains(text, "[GIT PATCH") {
-		m.setToast(text, 4*time.Second)
-		return
-	}
-	m.messages = append(m.messages, ChatMessage{
-		SenderName: "SYSTEM",
-		Content:    text,
-		Timestamp:  time.Now(),
-		IsSystem:   true,
-	})
-	m.trimMessagesBuffer()
-	m.viewport.SetContent(m.renderMessages())
-	m.viewport.GotoBottom()
+	m.setToast(text, 5*time.Second)
 }
 
 func formatTimeDivider(t time.Time, now time.Time, width int) string {
@@ -2228,7 +2185,6 @@ func (m *Model) renderMessages() string {
 	if wrapWidth < 20 {
 		wrapWidth = 20
 	}
-	bodyStyle := MessageText.Width(wrapWidth)
 
 	var sb strings.Builder
 
@@ -2259,13 +2215,8 @@ func (m *Model) renderMessages() string {
 		}
 
 		if msg.IsSystem {
-			lastSender = ""
-			if msg.IsFile {
-				sb.WriteString(fmt.Sprintf("%s\n\n", FileNoticeStyle.Width(wrapWidth).Render(msg.Content)))
-			} else {
-				sb.WriteString(fmt.Sprintf("%s %s\n\n", SenderSystemStyle.Render("[SYS] >"), bodyStyle.Render(msg.Content)))
-			}
-		} else {
+			continue
+		}
 			isGrouped := false
 			if lastSender != "" && msg.SenderName == lastSender && msg.ReplyToNum == 0 && msg.Timestamp.Sub(lastTime) < 90*time.Second {
 				isGrouped = true
@@ -2307,10 +2258,9 @@ func (m *Model) renderMessages() string {
 				sb.WriteString(formatted)
 			}
 
-			lastSender = msg.SenderName
-			lastTime = msg.Timestamp
-			msgIdx++
-		}
+		lastSender = msg.SenderName
+		lastTime = msg.Timestamp
+		msgIdx++
 	}
 	return sb.String()
 }
