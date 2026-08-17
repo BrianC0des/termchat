@@ -446,7 +446,7 @@ func (m *Model) renderHelpView() string {
 		HelpKeyStyle.Render("/room <name> [pw]"), HelpDescStyle.Render("Join 24/7 cloud room with optional AES-256 password"),
 		HelpKeyStyle.Render("/invite / /qr    "), HelpDescStyle.Render("Generate 1-click room invite link & ASCII QR code"),
 		HelpKeyStyle.Render("/identity /whoami"), HelpDescStyle.Render("Show device Ed25519 cryptographic fingerprint"),
-		HelpKeyStyle.Render("/kick / /ban     "), HelpDescStyle.Render("Room moderation controls (/unban, /banlist)"),
+		HelpKeyStyle.Render("/destroy confirm"), HelpDescStyle.Render("Instant self-destruct: zero RAM, purge history & disconnect"),
 		HelpKeyStyle.Render("/expire /autodel "), HelpDescStyle.Render("Room self-destruct countdown / disappearing messages"),
 
 		sectionFiles,

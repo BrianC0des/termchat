@@ -878,6 +878,7 @@ func (m *Model) handleTabComplete() {
 			"/diff", "/patch", "/apply", "/branch", "/branches", "/checkout", "/switch",
 			"/pr", "/issue", "/ci", "/editor", "/compose",
 			"/identity", "/whoami", "/invite", "/kick", "/ban", "/unban", "/banlist",
+			"/expire", "/destroy", "/nuke", "/autodelete",
 			"/help", "/qr", "/send", "/dir", "/connect",
 		}
 		lowerVal := strings.ToLower(val)
@@ -1412,6 +1413,30 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			m.roomExpiry = time.Now().Add(dur)
 			m.addSystemMsg(fmt.Sprintf("[TTL] ⏳ Room set to self-destruct in %s (at %s). Local history & buffers will be wiped upon expiration.", dur.Round(time.Second), m.roomExpiry.Format("15:04:05")))
 		}
+
+	case "/destroy", "/nuke", "/purge":
+		if m.manager.RoomName == "" {
+			m.addSystemMsg("[DESTROY] You are in offline LAN mode. Join a room first to destroy it.")
+			return
+		}
+		room := m.manager.RoomName
+		if len(parts) >= 2 && strings.ToLower(parts[1]) == "confirm" {
+			// 1. Zero out memory buffers
+			for i := range m.messages {
+				m.messages[i].Content = ""
+				m.messages[i].SenderName = ""
+			}
+			m.messages = []ChatMessage{}
+			// 2. Permanently purge history files on disk
+			system.PurgeHistory(room)
+			// 3. Disconnect from cloud room
+			m.manager.LeaveRoom()
+			m.viewport.SetContent("")
+			m.setToast(fmt.Sprintf("💥 [DESTROYED] Room #%s wiped! Memory zero-filled, history deleted, and session closed.", room), 6*time.Second)
+			return
+		}
+
+		m.setToast(fmt.Sprintf("⚠️ [WARN] Destroying #%s will wipe history & zero RAM! Type '/destroy confirm' to proceed.", room), 8*time.Second)
 
 	case "/autodelete", "/burn", "/ephemeral":
 		if len(parts) < 2 {
