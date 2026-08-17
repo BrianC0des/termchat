@@ -9,36 +9,108 @@ import (
 )
 
 var (
-	header3Regex   = regexp.MustCompile(`(?i)(?:^|\s{2,})(#{1,4}\s+)`)
-	bulletRegex    = regexp.MustCompile(`(?i)(?:^|\s{2,})([•\-\*]\s+)`)
-	numListRegex   = regexp.MustCompile(`(?i)(?:^|\s{2,})(\d+\.\s+)`)
-	dividerRegex   = regexp.MustCompile(`(?i)(?:^|\s{2,})([─\-]{3,}|={3,})`)
-	codeFenceRegex = regexp.MustCompile("(?i)(?:^|\\s{2,})(```[a-zA-Z0-9_-]*)")
-	codeTickRegex  = regexp.MustCompile("`([^`]+)`")
+	header3Regex     = regexp.MustCompile(`(?i)(?:^|\s{2,})(#{1,4}\s+)`)
+	bulletRegex      = regexp.MustCompile(`(?i)(?:^|\s{2,})([•\-\*]\s+)`)
+	numListRegex     = regexp.MustCompile(`(?i)(?:^|\s{2,})(\d+\.\s+)`)
+	dividerRegex     = regexp.MustCompile(`(?i)(?:^|\s{2,})([─\-]{3,}|={3,})`)
+	codeFenceRegex   = regexp.MustCompile("(?i)```([a-zA-Z0-9_-]*)")
+	codeTickRegex    = regexp.MustCompile("`([^`]+)`")
+	sqlKeywordRegex  = regexp.MustCompile(`(?i)\s{2,}(SELECT|FROM|WHERE|ORDER BY|GROUP BY|HAVING|LIMIT|JOIN|INNER JOIN|LEFT JOIN|RIGHT JOIN|INSERT INTO|VALUES|UPDATE|SET|DELETE FROM|CREATE TABLE|ALTER TABLE|DROP TABLE|DESCRIBE|DESC|--|/\*)`)
+	progKeywordRegex = regexp.MustCompile(`(?i)\s{2,}(func\s|def\s|class\s|return\s|import\s|package\s|const\s|let\s|var\s|if\s|else\s|for\s|while\s|try\s|catch\s|//|/\*)`)
 )
 
+func normalizeCodeBlockContent(inner string) string {
+	inner = strings.ReplaceAll(inner, "\r\n", "\n")
+	inner = strings.ReplaceAll(inner, "\r", "\n")
+
+	// If the code block was flattened into a single line or has few newlines, restore individual lines!
+	if strings.Count(inner, "\n") < 2 {
+		inner = sqlKeywordRegex.ReplaceAllString(inner, "\n$1")
+		inner = progKeywordRegex.ReplaceAllString(inner, "\n$1")
+		inner = regexp.MustCompile(`;\s{2,}`).ReplaceAllString(inner, ";\n")
+		inner = regexp.MustCompile(`\s{2,}(--|//)`).ReplaceAllString(inner, "\n$1")
+		inner = regexp.MustCompile(`\s{3,}`).ReplaceAllString(inner, "\n")
+	}
+	return inner
+}
+
 // normalizeFlattenedPaste detects if a pasted snippet had its newlines flattened into spaces,
-// and automatically restores clean newlines before headers, bullets, and dividers.
+// and automatically restores clean newlines before headers, bullets, dividers, and code lines.
 func normalizeFlattenedPaste(text string) string {
-	// If it already has multiple real newlines, just standardize CRLF
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
 
-	// If there are few/no newlines, but contains markdown structure markers separated by 2+ spaces, auto-split
+	if strings.Contains(text, "```") {
+		matches := codeFenceRegex.FindAllStringIndex(text, -1)
+		if len(matches) > 0 {
+			var sb strings.Builder
+			cursor := 0
+			for _, m := range matches {
+				sb.WriteString(text[cursor:m[0]])
+				sb.WriteString("\n" + text[m[0]:m[1]] + "\n")
+				cursor = m[1]
+			}
+			sb.WriteString(text[cursor:])
+			text = sb.String()
+		}
+	}
+
+	// Auto-split markdown headers, bullets, and dividers if flattened
 	if strings.Count(text, "\n") < 2 {
-		// Insert newlines around code fences
-		text = codeFenceRegex.ReplaceAllString(text, "\n$1\n")
-		// Insert newlines before markdown headings (###, ##, #)
 		text = header3Regex.ReplaceAllString(text, "\n$1")
-		// Insert newlines before bullets (•, -, *)
 		text = bulletRegex.ReplaceAllString(text, "\n$1")
-		// Insert newlines before numbered lists (1., 2.)
 		text = numListRegex.ReplaceAllString(text, "\n$1")
-		// Insert newlines before dividers (───, ---)
 		text = dividerRegex.ReplaceAllString(text, "\n$1")
 	}
 
-	return strings.TrimSpace(text)
+	lines := strings.Split(text, "\n")
+	var result []string
+	inBlock := false
+	var blockContent []string
+	var fenceHeader string
+
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		if strings.HasPrefix(trimmed, "```") {
+			if !inBlock {
+				inBlock = true
+				fenceHeader = trimmed
+				blockContent = []string{}
+			} else {
+				inBlock = false
+				result = append(result, fenceHeader)
+				innerRaw := strings.Join(blockContent, "\n")
+				normalizedInner := normalizeCodeBlockContent(innerRaw)
+				for _, inl := range strings.Split(normalizedInner, "\n") {
+					if strings.TrimSpace(inl) != "" {
+						result = append(result, inl)
+					}
+				}
+				result = append(result, "```")
+			}
+			continue
+		}
+
+		if inBlock {
+			blockContent = append(blockContent, l)
+		} else {
+			result = append(result, l)
+		}
+	}
+
+	if inBlock && len(blockContent) > 0 {
+		result = append(result, fenceHeader)
+		innerRaw := strings.Join(blockContent, "\n")
+		normalizedInner := normalizeCodeBlockContent(innerRaw)
+		for _, inl := range strings.Split(normalizedInner, "\n") {
+			if strings.TrimSpace(inl) != "" {
+				result = append(result, inl)
+			}
+		}
+		result = append(result, "```")
+	}
+
+	return strings.TrimSpace(strings.Join(result, "\n"))
 }
 
 // FormatChatMessage formats a message string (with markdown, code blocks, headers, bullet points,

@@ -351,8 +351,51 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// 1. Intercept terminal native paste / bracketed paste / multi-character burst
+		rawRunes := string(msg.Runes)
+		if len(msg.Runes) > 1 || strings.Contains(rawRunes, "\n") || strings.Contains(rawRunes, "\r") {
+			clipText := rawRunes
+			if clipText == "" {
+				clipText = msg.String()
+			}
+			clipText = strings.ReplaceAll(clipText, "\r\n", "\n")
+			clipText = strings.ReplaceAll(clipText, "\r", "\n")
+			lines := strings.Split(clipText, "\n")
+
+			if len(lines) > 1 || len(clipText) > 30 {
+				m.pasteCounter++
+				tokenKey := fmt.Sprintf("[Pasted text #%d +%d lines]", m.pasteCounter, len(lines))
+				if m.pastedSnippets == nil {
+					m.pastedSnippets = make(map[string]string)
+				}
+				m.pastedSnippets[tokenKey] = clipText
+
+				current := m.textInput.Value()
+				pos := m.textInput.Position()
+				if pos > len(current) {
+					pos = len(current)
+				}
+				newVal := current[:pos] + tokenKey + current[pos:]
+				m.textInput.SetValue(newVal)
+				m.textInput.SetCursor(pos + len(tokenKey))
+				return m, nil
+			}
+		}
+
 		switch msg.Type {
+		case tea.KeyEsc, tea.KeyCtrlK, tea.KeyCtrlL:
+			if m.textInput.Value() != "" {
+				m.textInput.SetValue("")
+				m.pastedSnippets = make(map[string]string)
+				return m, nil
+			}
+
 		case tea.KeyCtrlC:
+			if m.textInput.Value() != "" {
+				m.textInput.SetValue("")
+				m.pastedSnippets = make(map[string]string)
+				return m, nil
+			}
 			m.manager.Stop()
 			return m, tea.Quit
 
@@ -397,6 +440,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case tea.KeyCtrlU:
+			if m.textInput.Value() != "" {
+				m.textInput.SetValue("")
+				m.pastedSnippets = make(map[string]string)
+				return m, nil
+			}
 			m.viewport.HalfViewUp()
 			return m, nil
 
@@ -430,7 +478,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					pos = len(current)
 				}
 
-				if len(lines) > 1 || len(clipText) > 120 {
+				if len(lines) > 1 || len(clipText) > 30 {
 					m.pasteCounter++
 					tokenKey := fmt.Sprintf("[Pasted text #%d +%d lines]", m.pasteCounter, len(lines))
 					if m.pastedSnippets == nil {
@@ -651,6 +699,22 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if !m.filePicker.Active {
 		m.textInput, tiCmd = m.textInput.Update(msg)
+		val := m.textInput.Value()
+		if !strings.HasPrefix(val, "/") && (strings.Contains(val, "```") || (len(val) > 80 && !strings.Contains(val, "[Pasted text #"))) {
+			m.pasteCounter++
+			lines := strings.Split(val, "\n")
+			lineCount := len(lines)
+			if lineCount <= 1 {
+				lineCount = (len(val) / 60) + 1
+			}
+			tokenKey := fmt.Sprintf("[Pasted text #%d +%d lines]", m.pasteCounter, lineCount)
+			if m.pastedSnippets == nil {
+				m.pastedSnippets = make(map[string]string)
+			}
+			m.pastedSnippets[tokenKey] = val
+			m.textInput.SetValue(tokenKey)
+			m.textInput.SetCursor(len(tokenKey))
+		}
 	}
 
 	// Forward non-key events to viewport (mouse, resize, ticks)
