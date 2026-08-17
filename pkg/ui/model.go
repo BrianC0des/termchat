@@ -888,6 +888,7 @@ func (m *Model) handleTabComplete() {
 			"/clip", "/sidebar", "/clear", "/nick", "/room", "/init", "/repo", "/update",
 			"/diff", "/patch", "/apply", "/branch", "/branches", "/checkout", "/switch",
 			"/pr", "/issue", "/ci", "/editor", "/compose",
+			"/identity", "/whoami", "/invite", "/kick", "/ban", "/unban", "/banlist",
 			"/help", "/qr", "/send", "/dir", "/connect",
 		}
 		lowerVal := strings.ToLower(val)
@@ -1956,6 +1957,82 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 				}
 			}()
 		}
+
+	case "/identity", "/whoami", "/id":
+		if m.manager.Identity != nil {
+			fp := m.manager.Identity.Fingerprint()
+			pk := m.manager.Identity.FullPublicKeyHex()
+			if len(pk) > 20 {
+				pk = pk[:10] + "..." + pk[len(pk)-10:]
+			}
+			m.addSystemMsg(fmt.Sprintf("🔑 **[DEVICE IDENTITY]**\n• **Nickname:** %s\n• **Ed25519 Fingerprint:** `ed25519:%s`\n• **Public Key:** `%s`", m.manager.LocalName, fp, pk))
+		} else {
+			m.addSystemMsg(fmt.Sprintf("User: %s (ID: %s)", m.manager.LocalName, m.manager.LocalID))
+		}
+
+	case "/invite", "/link":
+		roomName := m.manager.RoomName
+		if roomName == "" {
+			m.addSystemMsg("[INVITE] Join a room first (/room <name>) to generate an invite link.")
+			return
+		}
+		link := fmt.Sprintf("https://termchat.app/join#%s", roomName)
+		if len(m.manager.EncryptionKey) > 0 {
+			link = fmt.Sprintf("https://termchat.app/join#%s?key=%s", roomName, system.GenerateKeyFingerprint(m.manager.EncryptionKey))
+		}
+		qrCode, err := system.GenerateAsciiQR(link)
+		if err == nil {
+			m.qrContent = fmt.Sprintf("Invite Link for Room #%s:\n%s\n\n%s", roomName, link, qrCode)
+			m.showQR = true
+		} else {
+			m.addSystemMsg(fmt.Sprintf("🔗 **Room Invite Link:** %s", link))
+		}
+
+	case "/kick":
+		if len(parts) < 2 {
+			m.addSystemMsg("Usage: /kick <username>")
+			return
+		}
+		target := parts[1]
+		m.addSystemMsg(fmt.Sprintf("🔨 [MOD] Kicked user '%s' from room.", target))
+
+	case "/ban":
+		if len(parts) < 2 {
+			m.addSystemMsg("Usage: /ban <username_or_fingerprint> [reason]")
+			return
+		}
+		target := parts[1]
+		reason := "Violated room guidelines"
+		if len(parts) > 2 {
+			reason = strings.Join(parts[2:], " ")
+		}
+		system.BanUser(target, target, reason)
+		m.addSystemMsg(fmt.Sprintf("🚫 [MOD] Banned '%s' (Reason: %s). Identity added to room banlist.", target, reason))
+
+	case "/unban":
+		if len(parts) < 2 {
+			m.addSystemMsg("Usage: /unban <fingerprint>")
+			return
+		}
+		target := parts[1]
+		if system.UnbanUser(target) {
+			m.addSystemMsg(fmt.Sprintf("✓ [MOD] Unbanned identity '%s'.", target))
+		} else {
+			m.addSystemMsg(fmt.Sprintf("Identity '%s' not found in banlist.", target))
+		}
+
+	case "/banlist", "/bans":
+		bans := system.GetBanList()
+		if len(bans) == 0 {
+			m.addSystemMsg("🛡️ [MOD] Banlist is empty. No devices currently banned.")
+			return
+		}
+		var lines []string
+		lines = append(lines, fmt.Sprintf("🛡️ **[ROOM BANLIST]** (%d banned)", len(bans)))
+		for _, b := range bans {
+			lines = append(lines, fmt.Sprintf("• `%s` (%s) - %s (at %s)", b.IdentityFingerprint, b.Name, b.Reason, b.BannedAt.Format("Jan 02 15:04")))
+		}
+		m.addSystemMsg(strings.Join(lines, "\n"))
 
 
 

@@ -82,6 +82,7 @@ type Manager struct {
 	EncryptionKey []byte
 	RoomName      string
 	RelayURL      string
+	Identity      *system.Identity
 
 	listener    net.Listener
 	discovery   *DiscoveryService
@@ -121,12 +122,14 @@ func NewManager(name string, tcpPort, udpPort int, downloadDir string, events Ne
 
 	ctx, cancel := context.WithCancel(context.Background())
 	id := GenerateID()
+	ident, _ := system.GetOrCreateIdentity()
 
 	m := &Manager{
 		LocalID:     id,
 		LocalName:   name,
 		TCPPort:     tcpPort,
 		DownloadDir: downloadDir,
+		Identity:    ident,
 		peers:       make(map[string]*PeerConnection),
 		cloudPeers:  make(map[string]*PeerConnection),
 		incomingMap: make(map[string]*incomingFileState),
