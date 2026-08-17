@@ -67,3 +67,12 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync to Hugging Face Dataset Mirror
+        if: env.HF_TOKEN != ''
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          pip install -q -U "huggingface_hub[cli]"
+          huggingface-cli upload BrianC0des/termchat-releases dist/ --repo-type=dataset --token="$HF_TOKEN" || true
+
