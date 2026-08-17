@@ -1472,6 +1472,20 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 				m.addSystemMsg(fmt.Sprintf("[ERR] Invalid file number #%d. Room has %d shared files. Press Ctrl+F to browse.", num, len(m.sharedFiles)))
 				return
 			}
+		} else if !strings.HasPrefix(fileURL, "http://") && !strings.HasPrefix(fileURL, "https://") {
+			// Try short token match or filename match from room history
+			found := false
+			for _, f := range m.sharedFiles {
+				if strings.Contains(f.URL, target) || strings.EqualFold(f.FileName, target) {
+					fileURL = f.URL
+					found = true
+					m.addSystemMsg(fmt.Sprintf("[RECV] Matched file '%s' from room history", f.FileName))
+					break
+				}
+			}
+			if !found {
+				fileURL = fmt.Sprintf("https://termchat-o51d.onrender.com/files/%s", target)
+			}
 		}
 
 		m.addSystemMsg(fmt.Sprintf("[RECV] Downloading file from %s...", fileURL))
@@ -2266,7 +2280,7 @@ func (m *Model) refreshSharedFiles() {
 	var list []SharedFileItem
 	idx := 1
 	for _, msg := range m.messages {
-		if strings.Contains(msg.Content, "Shared file:") {
+		if strings.Contains(msg.Content, "Shared file:") || strings.Contains(msg.Content, "[SHARED FILE]") {
 			lines := strings.Split(msg.Content, "\n")
 			fileName := "Shared File"
 			fileURL := ""
@@ -2277,10 +2291,20 @@ func (m *Model) refreshSharedFiles() {
 					if len(parts) >= 2 {
 						fileName = strings.TrimSpace(parts[1])
 					}
+				} else if strings.Contains(l, "[SHARED FILE]") {
+					if start := strings.Index(l, "`"); start != -1 {
+						if end := strings.Index(l[start+1:], "`"); end != -1 {
+							fileName = l[start+1 : start+1+end]
+						}
+					}
 				} else if strings.HasPrefix(trimmed, "🔗 ") {
 					fileURL = strings.TrimSpace(strings.TrimPrefix(trimmed, "🔗 "))
 				} else if strings.HasPrefix(trimmed, ":: ") && strings.HasPrefix(strings.TrimPrefix(trimmed, ":: "), "http") {
 					fileURL = strings.TrimSpace(strings.TrimPrefix(trimmed, ":: "))
+				} else if strings.HasPrefix(trimmed, "• http://") || strings.HasPrefix(trimmed, "• https://") {
+					fileURL = strings.TrimSpace(strings.TrimPrefix(trimmed, "• "))
+				} else if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+					fileURL = trimmed
 				}
 			}
 			if fileURL != "" {

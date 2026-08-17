@@ -1178,7 +1178,15 @@ func (m *Manager) SendFileWithExpiry(filePath, expiry string) error {
 				}
 				return
 			}
-			shareMsg := fmt.Sprintf("%s Shared file: %s (%s)\n:: %s\n[TTL] Auto-Expires in: %s\n:: Type `/get %s` or click the link to download", badge, fileName, FormatBytes(fileSize), dlURL, expiresIn, dlURL)
+			shortID := fileName
+			if idx := strings.Index(dlURL, "/files/"); idx != -1 {
+				sub := dlURL[idx+7:]
+				parts := strings.Split(sub, "/")
+				if len(parts) > 0 && parts[0] != "" {
+					shortID = parts[0]
+				}
+			}
+			shareMsg := fmt.Sprintf("📦 **[SHARED FILE]** `%s` (%s)\n• **Expires:** ⏳ %s • **Download:** Type `/get %s` (or click link below)\n• %s", fileName, FormatBytes(fileSize), expiresIn, shortID, dlURL)
 			_ = m.SendChat(shareMsg)
 			if m.events.OnMessage != nil {
 				m.events.OnMessage(m.LocalID, m.LocalName, shareMsg, time.Now(), 0, "", "")
