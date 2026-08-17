@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"hash/fnv"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"termchat/pkg/gitcollab"
 	"termchat/pkg/network"
 	"termchat/pkg/system"
 	"termchat/pkg/workspace"
@@ -798,6 +800,7 @@ func (m *Model) handleTabComplete() {
 			"/theme", "/themes", "/reply", "/status", "/afk", "/topic",
 			"/pin", "/pins", "/unpin", "/copy", "/files", "/browse",
 			"/clip", "/sidebar", "/clear", "/nick", "/room", "/init", "/repo", "/update",
+			"/diff", "/patch", "/apply", "/branch", "/branches", "/checkout", "/switch",
 			"/help", "/qr", "/send", "/dir", "/connect",
 		}
 		lowerVal := strings.ToLower(val)
@@ -1593,6 +1596,106 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			repoInfo = fmt.Sprintf("\n• Repository: %s", wsCfg.Repo)
 		}
 		m.addSystemMsg(fmt.Sprintf("[WORKSPACE] 🐙 Project Collab Room Initialized!\n• Config File: %s%s\n• Collab Room: #%s\n👉 Commit .termchat/room.json to git so teammates auto-join on 'git clone'!", path, repoInfo, wsCfg.Room))
+
+	case "/diff", "/patch":
+		staged := len(parts) > 1 && (parts[1] == "staged" || parts[1] == "--staged" || parts[1] == "--cached")
+		diffRes, err := gitcollab.CaptureDiff("", staged)
+		if err != nil {
+			m.addSystemMsg(fmt.Sprintf("[DIFF] %v", err))
+			return
+		}
+
+		filesList := strings.Join(diffRes.Files, ", ")
+		if len(filesList) > 60 {
+			filesList = filesList[:57] + "..."
+		}
+
+		diffType := "Uncommitted Working Tree"
+		if staged {
+			diffType = "Staged (Cached)"
+		}
+
+		cardMsg := fmt.Sprintf("📦 **[GIT PATCH #patch-%s]** %s\n• **Changes:** +%d / -%d in %d file(s) (`%s`)\n• **Apply:** Type `/apply %s` to apply this patch directly to your repository!\n```diff\n%s\n```",
+			diffRes.PatchID, diffType, diffRes.Additions, diffRes.Deletions, len(diffRes.Files), filesList, diffRes.PatchID, diffRes.RawDiff)
+
+		m.messages = append(m.messages, ChatMessage{
+			SenderID:   m.manager.LocalID,
+			SenderName: m.manager.LocalName,
+			Content:    cardMsg,
+			Timestamp:  time.Now(),
+			IsMe:       true,
+		})
+		system.AppendHistory(m.manager.RoomName, system.HistoryEntry{
+			SenderID:   m.manager.LocalID,
+			SenderName: m.manager.LocalName,
+			Content:    cardMsg,
+			Timestamp:  time.Now(),
+			IsMe:       true,
+		})
+		_ = m.manager.SendChat(cardMsg)
+		m.viewport.SetContent(m.renderMessages())
+		m.viewport.GotoBottom()
+
+	case "/apply":
+		if len(parts) < 2 {
+			m.addSystemMsg("Usage: /apply <patch_id>\nExample: /apply 7f8a9b1c (or /apply #patch-7f8a9b1c)")
+			return
+		}
+		patchID := strings.TrimPrefix(parts[1], "#patch-")
+		patchID = strings.TrimPrefix(patchID, "#")
+
+		patchContent, ok := gitcollab.GetPatch(patchID)
+		if !ok {
+			// Search recent messages for matching diff block if not in local memory
+			for i := len(m.messages) - 1; i >= 0; i-- {
+				msg := m.messages[i].Content
+				if strings.Contains(msg, "#patch-"+patchID) {
+					if startIdx := strings.Index(msg, "```diff\n"); startIdx != -1 {
+						raw := msg[startIdx+8:]
+						if endIdx := strings.Index(raw, "\n```"); endIdx != -1 {
+							patchContent = raw[:endIdx]
+							ok = true
+							break
+						}
+					}
+				}
+			}
+		}
+
+		if !ok || patchContent == "" {
+			m.addSystemMsg(fmt.Sprintf("[GIT] Error: Patch #patch-%s not found in memory or recent chat.", patchID))
+			return
+		}
+
+		msg, err := gitcollab.ApplyPatch("", patchContent)
+		if err != nil {
+			m.addSystemMsg(fmt.Sprintf("[GIT] %v", err))
+			return
+		}
+		m.addSystemMsg(fmt.Sprintf("[GIT] ✓ Applied patch #patch-%s cleanly to your local workspace! (%s)", patchID, msg))
+
+	case "/branch", "/branches":
+		if out, err := exec.Command("git", "branch", "--show-current").Output(); err == nil && len(out) > 0 {
+			curr := strings.TrimSpace(string(out))
+			m.addSystemMsg(fmt.Sprintf("🌿 Active Git Branch: %s", curr))
+		} else {
+			m.addSystemMsg("[GIT] Not inside a git repository.")
+		}
+
+	case "/checkout", "/switch":
+		if len(parts) < 2 {
+			m.addSystemMsg("Usage: /checkout <branch_name>\nExample: /checkout feat/auth-tokens")
+			return
+		}
+		targetBranch := parts[1]
+		cmd := exec.Command("git", "checkout", targetBranch)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			m.addSystemMsg(fmt.Sprintf("[GIT] Failed to switch branch: %s", strings.TrimSpace(string(out))))
+			return
+		}
+		m.addSystemMsg(fmt.Sprintf("🌿 Switched to Git branch '%s'!", targetBranch))
+
 
 
 	case "/clear":
