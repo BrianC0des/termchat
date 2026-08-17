@@ -454,10 +454,17 @@ func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 		archiveName := getPlatformArchiveName()
 
 		urls := []string{
-			// Tier 1: Fastly CDN Edge (Manila node, 15ms latency)
+			// Tier 0: Hugging Face Cloudflare Enterprise Global Edge CDN (Manila / Singapore Edge nodes, 80+ MB/s)
+			fmt.Sprintf("https://huggingface.co/datasets/BrianC0des/termchat-releases/resolve/main/%s", archiveName),
+			fmt.Sprintf("https://huggingface.co/datasets/BrianC0des/termchat-releases/resolve/main/%s", binaryName),
+			fmt.Sprintf("https://huggingface.co/BrianC0des/termchat-releases/resolve/main/%s", archiveName),
+			fmt.Sprintf("https://huggingface.co/BrianC0des/termchat-releases/resolve/main/%s", binaryName),
+
+			// Tier 1: Fastly CDN Edge & jsDelivr (Manila node)
 			fmt.Sprintf("https://raw.githubusercontent.com/BrianC0des/termchat/binaries/%s", archiveName),
 			fmt.Sprintf("https://cdn.jsdelivr.net/gh/BrianC0des/termchat@binaries/%s", archiveName),
 			fmt.Sprintf("https://fastly.jsdelivr.net/gh/BrianC0des/termchat@binaries/%s", archiveName),
+			fmt.Sprintf("https://gcore.jsdelivr.net/gh/BrianC0des/termchat@binaries/%s", archiveName),
 
 			// Tier 2: GitHub Releases Direct S3
 			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", archiveName),
@@ -601,10 +608,17 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	archiveName := getPlatformArchiveName()
 
 	urls := []string{
-		// Tier 1: Fastly CDN Edge (Manila node, 15ms latency)
+		// Tier 0: Hugging Face Cloudflare Enterprise Global Edge CDN (Manila / Singapore Edge nodes, 80+ MB/s)
+		fmt.Sprintf("https://huggingface.co/datasets/BrianC0des/termchat-releases/resolve/main/%s", archiveName),
+		fmt.Sprintf("https://huggingface.co/datasets/BrianC0des/termchat-releases/resolve/main/%s", binaryName),
+		fmt.Sprintf("https://huggingface.co/BrianC0des/termchat-releases/resolve/main/%s", archiveName),
+		fmt.Sprintf("https://huggingface.co/BrianC0des/termchat-releases/resolve/main/%s", binaryName),
+
+		// Tier 1: Fastly CDN Edge & jsDelivr (Manila node)
 		fmt.Sprintf("https://raw.githubusercontent.com/BrianC0des/termchat/binaries/%s", archiveName),
 		fmt.Sprintf("https://cdn.jsdelivr.net/gh/BrianC0des/termchat@binaries/%s", archiveName),
 		fmt.Sprintf("https://fastly.jsdelivr.net/gh/BrianC0des/termchat@binaries/%s", archiveName),
+		fmt.Sprintf("https://gcore.jsdelivr.net/gh/BrianC0des/termchat@binaries/%s", archiveName),
 
 		// Tier 2: GitHub Releases Direct S3
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", archiveName),

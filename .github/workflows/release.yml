@@ -93,3 +93,29 @@ jobs:
           publish_dir: ./dist
           keep_files: false
           force_orphan: true
+
+      - name: Sync to Hugging Face Cloudflare Global CDN
+        if: ${{ env.HF_TOKEN != '' }}
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          pip install --upgrade huggingface_hub
+          python3 -c "
+          import os
+          from huggingface_hub import HfApi
+          token = os.environ.get('HF_TOKEN')
+          if token:
+              api = HfApi(token=token)
+              repo_id = 'BrianC0des/termchat-releases'
+              try:
+                  api.create_repo(repo_id=repo_id, repo_type='dataset', exist_ok=True)
+              except Exception as e:
+                  print(f'HF Repo check: {e}')
+              api.upload_folder(
+                  folder_path='dist',
+                  repo_id=repo_id,
+                  repo_type='dataset'
+              )
+              print('Successfully published to Hugging Face Cloudflare Edge CDN!')
+          "
+
