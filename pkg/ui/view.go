@@ -406,6 +406,7 @@ func (m *Model) renderHelpView() string {
   %s %s
   %s %s
   %s %s
+  %s %s
 
   %s
 `,
@@ -424,6 +425,7 @@ func (m *Model) renderHelpView() string {
 		HelpKeyStyle.Render("/pin <#>         "), HelpDescStyle.Render("Pin important message to the top header banner"),
 		HelpKeyStyle.Render("/clip / /c       "), HelpDescStyle.Render("Sync current system clipboard content with peers"),
 		HelpKeyStyle.Render("F3 / Ctrl+B      "), HelpDescStyle.Render("Toggle sidebar (Normal, Wide, Zen Fullscreen)"),
+		HelpKeyStyle.Render("Ctrl+E / /fold   "), HelpDescStyle.Render("Toggle Discord-style folding/expansion for code blocks"),
 		HelpKeyStyle.Render("/theme <name>    "), HelpDescStyle.Render("Switch color theme (catppuccin, dracula, nord, matrix, etc.)"),
 		HelpKeyStyle.Render("/dir <path>      "), HelpDescStyle.Render("Change destination directory for incoming downloads"),
 		HelpKeyStyle.Render("/qr              "), HelpDescStyle.Render("Display ASCII QR Code for fast mobile pairing"),

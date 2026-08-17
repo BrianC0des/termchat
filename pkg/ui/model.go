@@ -97,8 +97,9 @@ type Model struct {
 	autoDeleteTTL time.Duration
 	updateStatus  string
 
-	pastedSnippets map[string]string
-	pasteCounter   int
+	pastedSnippets   map[string]string
+	pasteCounter     int
+	expandCodeBlocks bool
 }
 
 type SidebarMode int
@@ -417,6 +418,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sidebarMode = SidebarNormal
 			}
 			m.recalculateViewport()
+			return m, nil
+
+		case tea.KeyCtrlE, tea.KeyF4:
+			m.expandCodeBlocks = !m.expandCodeBlocks
+			if m.expandCodeBlocks {
+				m.addSystemMsg("[VIEW] Code blocks expanded (Press Ctrl+E or /fold to collapse)")
+			} else {
+				m.addSystemMsg("[VIEW] Code blocks collapsed (Press Ctrl+E or /expand to show full code)")
+			}
+			m.viewport.SetContent(m.renderMessages())
 			return m, nil
 
 		case tea.KeyUp:
@@ -1029,6 +1040,15 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		} else {
 			m.addSystemMsg(fmt.Sprintf("[ERR] Unknown theme '%s'. Type `/themes` to see available palettes.", targetTheme))
 		}
+
+	case "/fold", "/expand", "/collapse":
+		m.expandCodeBlocks = !m.expandCodeBlocks
+		if m.expandCodeBlocks {
+			m.addSystemMsg("[VIEW] Code blocks expanded (Press Ctrl+E or /fold to collapse)")
+		} else {
+			m.addSystemMsg("[VIEW] Code blocks collapsed (Press Ctrl+E or /expand to show full code)")
+		}
+		m.viewport.SetContent(m.renderMessages())
 
 	case "/status":
 		if len(parts) < 2 {
@@ -1770,7 +1790,7 @@ func (m *Model) renderMessages() string {
 				// Clean indented continuation: only message index and vertical guide
 				firstLinePrefix := fmt.Sprintf("   %s%s %s", numBadge, timerBadge, lipgloss.NewStyle().Foreground(MutedColor).Render("│"))
 				continuationPrefix := fmt.Sprintf("       %s", lipgloss.NewStyle().Foreground(MutedColor).Render("│"))
-				formatted := FormatChatMessage(msg.Content, wrapWidth, firstLinePrefix, continuationPrefix, m.manager.LocalName)
+				formatted := FormatChatMessageWithFold(msg.Content, wrapWidth, firstLinePrefix, continuationPrefix, m.manager.LocalName, m.expandCodeBlocks)
 				sb.WriteString(formatted)
 			} else {
 				if msgIdx > 1 && !lastTime.IsZero() && msg.Timestamp.Sub(lastTime) < 5*time.Minute {
@@ -1780,7 +1800,7 @@ func (m *Model) renderMessages() string {
 				nameTag := getUserNameStyle(msg.SenderName, msg.IsMe).Render(fmt.Sprintf("[%s]:", msg.SenderName))
 				firstLinePrefix := fmt.Sprintf("%s %s", prefix, nameTag)
 				continuationPrefix := fmt.Sprintf("   %s", lipgloss.NewStyle().Foreground(MutedColor).Render("│"))
-				formatted := FormatChatMessage(msg.Content, wrapWidth, firstLinePrefix, continuationPrefix, m.manager.LocalName)
+				formatted := FormatChatMessageWithFold(msg.Content, wrapWidth, firstLinePrefix, continuationPrefix, m.manager.LocalName, m.expandCodeBlocks)
 				sb.WriteString(formatted)
 			}
 

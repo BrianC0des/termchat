@@ -35,11 +35,60 @@ func normalizeCodeBlockContent(inner string) string {
 	return inner
 }
 
+// detectCodeLanguage inspects raw un-fenced text and determines if it is source code.
+func detectCodeLanguage(text string) (bool, string) {
+	lower := strings.ToLower(text)
+
+	// SQL Detection
+	if strings.Contains(lower, "select ") && (strings.Contains(lower, "from ") || strings.Contains(lower, "where ") || strings.Contains(lower, "join ") || strings.Contains(lower, "limit ")) {
+		return true, "sql"
+	}
+	if strings.Contains(lower, "create table ") || strings.Contains(lower, "insert into ") || strings.Contains(lower, "alter table ") {
+		return true, "sql"
+	}
+
+	// Python Detection
+	if (strings.Contains(text, "def ") || strings.Contains(text, "async def ") || strings.Contains(text, "import ") || strings.Contains(text, "from ")) &&
+		(strings.Contains(text, ":\n") || strings.Contains(text, "print(") || strings.Contains(text, "__main__") || strings.Contains(text, "return ") || strings.Contains(text, "self.")) {
+		return true, "python"
+	}
+
+	// Go Detection
+	if (strings.Contains(text, "func ") || strings.Contains(text, "package ")) &&
+		(strings.Contains(text, "import (") || strings.Contains(text, "struct {") || strings.Contains(text, ":=") || strings.Contains(text, "fmt.")) {
+		return true, "go"
+	}
+
+	// JavaScript / TypeScript Detection
+	if (strings.Contains(text, "const ") || strings.Contains(text, "let ") || strings.Contains(text, "function ") || strings.Contains(text, "async function ")) &&
+		(strings.Contains(text, "console.log") || strings.Contains(text, "=>") || strings.Contains(text, "export ") || strings.Contains(text, "require(")) {
+		return true, "javascript"
+	}
+
+	// Rust / C / C++
+	if strings.Contains(text, "#include <") || strings.Contains(text, "int main(") {
+		return true, "c"
+	}
+	if strings.Contains(text, "fn main()") || (strings.Contains(text, "impl ") && strings.Contains(text, "struct ")) {
+		return true, "rust"
+	}
+
+	return false, ""
+}
+
 // normalizeFlattenedPaste detects if a pasted snippet had its newlines flattened into spaces,
 // and automatically restores clean newlines before headers, bullets, dividers, and code lines.
 func normalizeFlattenedPaste(text string) string {
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
+
+	// If the user pasted raw code without markdown backticks, auto-wrap it!
+	if !strings.Contains(text, "```") {
+		if isCode, lang := detectCodeLanguage(text); isCode {
+			normalizedCode := normalizeCodeBlockContent(text)
+			return fmt.Sprintf("```%s\n%s\n```", lang, strings.TrimSpace(normalizedCode))
+		}
+	}
 
 	if strings.Contains(text, "```") {
 		matches := codeFenceRegex.FindAllStringIndex(text, -1)
@@ -114,14 +163,87 @@ func normalizeFlattenedPaste(text string) string {
 	return strings.TrimSpace(strings.Join(result, "\n"))
 }
 
+// foldLongCodeBlocks checks if markdown code blocks exceed maxLines, and collapses them with a preview.
+func foldLongCodeBlocks(text string, maxLines int) string {
+	lines := strings.Split(text, "\n")
+	var result []string
+	inBlock := false
+	var blockLines []string
+	var fenceHeader string
+
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		if strings.HasPrefix(trimmed, "```") {
+			if !inBlock {
+				inBlock = true
+				fenceHeader = trimmed
+				blockLines = []string{}
+			} else {
+				inBlock = false
+				result = append(result, fenceHeader)
+				if len(blockLines) > maxLines {
+					previewCount := 5
+					if previewCount > len(blockLines) {
+						previewCount = len(blockLines)
+					}
+					for i := 0; i < previewCount; i++ {
+						result = append(result, blockLines[i])
+					}
+					hiddenCount := len(blockLines) - previewCount
+					result = append(result, fmt.Sprintf("... +%d lines folded (Press Ctrl+E or /expand to show)", hiddenCount))
+				} else {
+					result = append(result, blockLines...)
+				}
+				result = append(result, "```")
+			}
+			continue
+		}
+
+		if inBlock {
+			blockLines = append(blockLines, l)
+		} else {
+			result = append(result, l)
+		}
+	}
+
+	if inBlock && len(blockLines) > 0 {
+		result = append(result, fenceHeader)
+		if len(blockLines) > maxLines {
+			previewCount := 5
+			if previewCount > len(blockLines) {
+				previewCount = len(blockLines)
+			}
+			for i := 0; i < previewCount; i++ {
+				result = append(result, blockLines[i])
+			}
+			hiddenCount := len(blockLines) - previewCount
+			result = append(result, fmt.Sprintf("... +%d lines folded (Press Ctrl+E or /expand to show)", hiddenCount))
+		} else {
+			result = append(result, blockLines...)
+		}
+		result = append(result, "```")
+	}
+
+	return strings.Join(result, "\n")
+}
+
 // FormatChatMessage formats a message string (with markdown, code blocks, headers, bullet points,
 // and continuation lines) into beautifully aligned terminal output matching Discord/Slack/GitHub.
 func FormatChatMessage(rawContent string, wrapWidth int, firstLinePrefix string, continuationPrefix string, myName string) string {
+	return FormatChatMessageWithFold(rawContent, wrapWidth, firstLinePrefix, continuationPrefix, myName, false)
+}
+
+// FormatChatMessageWithFold formats a message string with option to expand or fold long code blocks.
+func FormatChatMessageWithFold(rawContent string, wrapWidth int, firstLinePrefix string, continuationPrefix string, myName string, expandCodeBlocks bool) string {
 	if wrapWidth < 30 {
 		wrapWidth = 30
 	}
 
 	content := normalizeFlattenedPaste(rawContent)
+
+	if !expandCodeBlocks {
+		content = foldLongCodeBlocks(content, 8)
+	}
 
 	// Check if message has rich markdown content (code block, heading, list, quote, table)
 	hasMarkdown := strings.Contains(content, "```") ||
