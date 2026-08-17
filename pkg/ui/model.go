@@ -1579,6 +1579,31 @@ func (m *Model) addSystemMsg(text string) {
 	m.viewport.GotoBottom()
 }
 
+func formatTimeDivider(t time.Time, now time.Time, width int) string {
+	label := t.Format("03:04 PM")
+	if t.Year() == now.Year() && t.YearDay() == now.YearDay() {
+		label = fmt.Sprintf("Today, %s", t.Format("03:04 PM"))
+	} else if t.Year() == now.Year() && t.YearDay() == now.YearDay()-1 {
+		label = fmt.Sprintf("Yesterday, %s", t.Format("03:04 PM"))
+	} else if t.Year() == now.Year() {
+		label = t.Format("Jan 02, 03:04 PM")
+	} else {
+		label = t.Format("Jan 02 2006, 03:04 PM")
+	}
+
+	contentLen := len(label) + 2
+	lineLen := (width - contentLen) / 2
+	if lineLen < 3 {
+		lineLen = 3
+	}
+	rule := strings.Repeat("─", lineLen)
+	ruleStyle := lipgloss.NewStyle().Foreground(MutedColor)
+	labelStyle := lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true)
+
+	dividerText := fmt.Sprintf("%s %s %s", ruleStyle.Render(rule), labelStyle.Render(label), ruleStyle.Render(rule))
+	return lipgloss.NewStyle().Width(width).Align(lipgloss.Center).Render(dividerText)
+}
+
 func (m *Model) renderMessages() string {
 	wrapWidth := m.viewport.Width - 16
 	if wrapWidth < 20 {
@@ -1601,8 +1626,19 @@ func (m *Model) renderMessages() string {
 	msgIdx := 1
 	var lastSender string
 	var lastTime time.Time
+	now := time.Now()
 
 	for _, msg := range m.messages {
+		// Insert centered time divider on natural conversation breaks (5+ mins) or day change
+		if lastTime.IsZero() || msg.Timestamp.Sub(lastTime) >= 5*time.Minute || msg.Timestamp.YearDay() != lastTime.YearDay() || msg.Timestamp.Year() != lastTime.Year() {
+			divider := formatTimeDivider(msg.Timestamp, now, wrapWidth)
+			if msgIdx > 1 {
+				sb.WriteString("\n")
+			}
+			sb.WriteString(divider + "\n\n")
+			lastSender = ""
+		}
+
 		if msg.IsSystem {
 			lastSender = ""
 			timeStr := TimeStyle.Render(msg.Timestamp.Format("15:04:05"))
@@ -1650,7 +1686,7 @@ func (m *Model) renderMessages() string {
 				continuationPrefix := fmt.Sprintf("   %s %s%s %s", timeStr, numBadge, timerBadge, lipgloss.NewStyle().Foreground(MutedColor).Render("│"))
 				sb.WriteString(fmt.Sprintf("%s %s\n", continuationPrefix, renderedContent))
 			} else {
-				if msgIdx > 1 {
+				if msgIdx > 1 && !lastTime.IsZero() && msg.Timestamp.Sub(lastTime) < 5*time.Minute {
 					sb.WriteString("\n")
 				}
 				prefix := fmt.Sprintf("%s %s%s", timeStr, numBadge, timerBadge)
