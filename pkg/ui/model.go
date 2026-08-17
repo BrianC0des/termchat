@@ -1670,26 +1670,22 @@ func (m *Model) renderMessages() string {
 				}
 			}
 
-			renderedContent := msg.Content
-			myMention := "@" + m.manager.LocalName
-			if strings.Contains(strings.ToLower(renderedContent), strings.ToLower(myMention)) || strings.Contains(strings.ToLower(renderedContent), "@all") {
-				highlightStyle := lipgloss.NewStyle().Bold(true).Foreground(WarningColor)
-				renderedContent = highlightStyle.Render(renderedContent)
-			} else {
-				renderedContent = bodyStyle.Render(renderedContent)
-			}
-
 			if isGrouped {
 				// Clean indented continuation: only message index and vertical guide
-				continuationPrefix := fmt.Sprintf("   %s%s %s", numBadge, timerBadge, lipgloss.NewStyle().Foreground(MutedColor).Render("│"))
-				sb.WriteString(fmt.Sprintf("%s %s\n", continuationPrefix, renderedContent))
+				firstLinePrefix := fmt.Sprintf("   %s%s %s", numBadge, timerBadge, lipgloss.NewStyle().Foreground(MutedColor).Render("│"))
+				continuationPrefix := fmt.Sprintf("       %s", lipgloss.NewStyle().Foreground(MutedColor).Render("│"))
+				formatted := FormatChatMessage(msg.Content, wrapWidth, firstLinePrefix, continuationPrefix, m.manager.LocalName)
+				sb.WriteString(formatted)
 			} else {
 				if msgIdx > 1 && !lastTime.IsZero() && msg.Timestamp.Sub(lastTime) < 5*time.Minute {
 					sb.WriteString("\n")
 				}
 				prefix := fmt.Sprintf("%s%s", numBadge, timerBadge)
-				nameTag := getUserNameStyle(msg.SenderName, msg.IsMe).Render(fmt.Sprintf("[%s]", msg.SenderName))
-				sb.WriteString(fmt.Sprintf("%s %s: %s\n", prefix, nameTag, renderedContent))
+				nameTag := getUserNameStyle(msg.SenderName, msg.IsMe).Render(fmt.Sprintf("[%s]:", msg.SenderName))
+				firstLinePrefix := fmt.Sprintf("%s %s", prefix, nameTag)
+				continuationPrefix := fmt.Sprintf("   %s", lipgloss.NewStyle().Foreground(MutedColor).Render("│"))
+				formatted := FormatChatMessage(msg.Content, wrapWidth, firstLinePrefix, continuationPrefix, m.manager.LocalName)
+				sb.WriteString(formatted)
 			}
 
 			lastSender = msg.SenderName

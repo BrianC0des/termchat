@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const AppVersion = "v1.9.3"
+const AppVersion = "v1.9.4"
 
 var (
 	preFetchMu       sync.RWMutex
@@ -45,15 +45,22 @@ type progressWriter struct {
 func (pw *progressWriter) Write(p []byte) (int, error) {
 	n := len(p)
 	pw.current += int64(n)
-	if time.Since(pw.lastReport) > 400*time.Millisecond || pw.current == pw.total {
+	if time.Since(pw.lastReport) > 200*time.Millisecond || pw.current == pw.total {
 		pw.lastReport = time.Now()
-		if pw.onProgress != nil && pw.total > 0 {
-			pct := int((float64(pw.current) / float64(pw.total)) * 100)
-			pw.onProgress(fmt.Sprintf("[NET] Downloading update: %d%% (%.1f / %.1f MB)...",
-				pct,
-				float64(pw.current)/(1024*1024),
-				float64(pw.total)/(1024*1024),
-			))
+		if pw.onProgress != nil {
+			if pw.total > 500000 {
+				pct := int((float64(pw.current) / float64(pw.total)) * 100)
+				if pct > 100 {
+					pct = 100
+				}
+				pw.onProgress(fmt.Sprintf("[NET] Downloading update: %d%% (%.1f / %.1f MB)...",
+					pct,
+					float64(pw.current)/(1024*1024),
+					float64(pw.total)/(1024*1024),
+				))
+			} else {
+				pw.onProgress(fmt.Sprintf("[NET] Downloading update: %.1f MB...", float64(pw.current)/(1024*1024)))
+			}
 		}
 	}
 	return n, nil
@@ -270,7 +277,7 @@ func resolveFinalDownloadURL(client *http.Client, initialURL string) (string, in
 			return initialURL, 0, err
 		}
 	}
-	req.Header.Set("User-Agent", "TermChat-Updater/1.7")
+	req.Header.Set("User-Agent", "TermChat-Updater/1.8")
 
 	redirectClient := &http.Client{
 		Transport: client.Transport,
@@ -287,10 +294,15 @@ func resolveFinalDownloadURL(client *http.Client, initialURL string) (string, in
 	defer resp.Body.Close()
 
 	if loc := resp.Header.Get("Location"); loc != "" {
-		return loc, resp.ContentLength, nil
+		// Do not return 302 response ContentLength because that's just the redirect HTML stub
+		return loc, 0, nil
 	}
 
-	return initialURL, resp.ContentLength, nil
+	if resp.StatusCode == http.StatusOK && resp.ContentLength > 100000 {
+		return initialURL, resp.ContentLength, nil
+	}
+
+	return initialURL, 0, nil
 }
 
 func downloadMultiThreaded(client *http.Client, targetURL string, totalSize int64, pw *progressWriter) ([]byte, error) {
