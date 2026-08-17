@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"crypto/rand"
 	"fmt"
 	"hash/fnv"
 	"os"
@@ -107,6 +108,9 @@ type Model struct {
 
 	toastMsg     string
 	toastExpires time.Time
+
+	destroyCode string
+	destroyRoom string
 }
 
 type SidebarMode int
@@ -1416,27 +1420,40 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 
 	case "/destroy", "/nuke", "/purge":
 		if m.manager.RoomName == "" {
-			m.addSystemMsg("[DESTROY] You are in offline LAN mode. Join a room first to destroy it.")
+			m.setToast("[DESTROY] You are in offline LAN mode. Join a room first to destroy it.", 4*time.Second)
 			return
 		}
 		room := m.manager.RoomName
-		if len(parts) >= 2 && strings.ToLower(parts[1]) == "confirm" {
-			// 1. Zero out memory buffers
-			for i := range m.messages {
-				m.messages[i].Content = ""
-				m.messages[i].SenderName = ""
+		if len(parts) >= 2 {
+			codeArg := strings.TrimSpace(parts[1])
+			if (m.destroyCode != "" && strings.EqualFold(codeArg, m.destroyCode)) || strings.EqualFold(codeArg, room) || strings.EqualFold(codeArg, "confirm") {
+				// 1. Zero out memory buffers
+				for i := range m.messages {
+					m.messages[i].Content = ""
+					m.messages[i].SenderName = ""
+				}
+				m.messages = []ChatMessage{}
+				// 2. Permanently purge history files on disk
+				system.PurgeHistory(room)
+				// 3. Disconnect from cloud room
+				m.manager.LeaveRoom()
+				m.destroyCode = ""
+				m.destroyRoom = ""
+				m.viewport.SetContent("")
+				m.setToast(fmt.Sprintf("💥 [DESTROYED] Room #%s wiped! Memory zero-filled, history deleted, and session closed.", room), 6*time.Second)
+				return
 			}
-			m.messages = []ChatMessage{}
-			// 2. Permanently purge history files on disk
-			system.PurgeHistory(room)
-			// 3. Disconnect from cloud room
-			m.manager.LeaveRoom()
-			m.viewport.SetContent("")
-			m.setToast(fmt.Sprintf("💥 [DESTROYED] Room #%s wiped! Memory zero-filled, history deleted, and session closed.", room), 6*time.Second)
+			m.setToast(fmt.Sprintf("❌ [ERR] Incorrect code '%s'. Type '/destroy' to generate a confirmation code.", codeArg), 5*time.Second)
 			return
 		}
 
-		m.setToast(fmt.Sprintf("⚠️ [WARN] Destroying #%s will wipe history & zero RAM! Type '/destroy confirm' to proceed.", room), 8*time.Second)
+		// Generate random 4-digit confirmation code
+		b := make([]byte, 2)
+		_, _ = rand.Read(b)
+		code := fmt.Sprintf("%02X%02X", b[0], b[1])
+		m.destroyCode = code
+		m.destroyRoom = room
+		m.setToast(fmt.Sprintf("⚠️ [WARN] To destroy #%s and wipe all history, type:  /destroy %s", room, code), 14*time.Second)
 
 	case "/autodelete", "/burn", "/ephemeral":
 		if len(parts) < 2 {
