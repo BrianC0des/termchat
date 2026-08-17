@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"termchat/pkg/network"
+	"termchat/pkg/system"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -162,15 +163,29 @@ func (m *Model) View() string {
 			Render(strings.Join(lines, " | "))
 	}
 
-	// 5. Input Line
+	// 5. Input Line with Bottom-Right Version Display
 	prompt := InputPromptStyle.Render(fmt.Sprintf("%s@termchat:~$ ", m.manager.LocalName))
-	inputBox := lipgloss.JoinHorizontal(lipgloss.Center, prompt, m.textInput.View())
+	verBadge := lipgloss.NewStyle().Foreground(MutedColor).Bold(true).Render(fmt.Sprintf("v%s", system.AppVersion))
+
+	m.textInput.Width = m.width - lipgloss.Width(prompt) - lipgloss.Width(verBadge) - 6
+	if m.textInput.Width < 10 {
+		m.textInput.Width = 10
+	}
+
+	inputContent := lipgloss.JoinHorizontal(lipgloss.Center, prompt, m.textInput.View())
+	gapWidth := m.width - lipgloss.Width(inputContent) - lipgloss.Width(verBadge) - 3
+	if gapWidth < 1 {
+		gapWidth = 1
+	}
+
+	inputRow := lipgloss.JoinHorizontal(lipgloss.Center, inputContent, strings.Repeat(" ", gapWidth), verBadge)
+
 	styledInput := lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), true, false, false, false).
 		BorderForeground(PrimaryColor).
 		Width(m.width).
 		Padding(0, 1).
-		Render(inputBox)
+		Render(inputRow)
 
 	var layout []string
 	layout = append(layout, headerBar, body)

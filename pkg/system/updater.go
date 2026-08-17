@@ -482,15 +482,12 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	}
 
 	latestTag, err := FetchLatestVersionTag()
-	if err == nil && latestTag != "" {
-		if strings.EqualFold(latestTag, AppVersion) || latestTag <= AppVersion {
-			return fmt.Sprintf("[OK] You are already on the latest version of TermChat (%s)!", AppVersion), nil
-		}
-		if onProgress != nil {
-			onProgress(fmt.Sprintf("[NET] Found new version: %s (Current: %s)", latestTag, AppVersion))
-		}
-	} else {
-		latestTag = AppVersion
+	if err != nil || latestTag == "" || strings.EqualFold(latestTag, AppVersion) || latestTag <= AppVersion {
+		return fmt.Sprintf("[OK] You are already on the latest version of TermChat (%s)!", AppVersion), nil
+	}
+
+	if onProgress != nil {
+		onProgress(fmt.Sprintf("[NET] Found new version: %s (Current: %s)", latestTag, AppVersion))
 	}
 
 	execPath, err := os.Executable()
