@@ -11,6 +11,7 @@ import (
 	"termchat/pkg/network"
 	"termchat/pkg/system"
 	"termchat/pkg/ui"
+	"termchat/pkg/workspace"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -42,10 +43,34 @@ func main() {
 	updateFlag := flag.Bool("update", false, "Self-update TermChat to the latest release")
 	versionFlag := flag.Bool("version", false, "Show TermChat version")
 	vFlag := flag.Bool("v", false, "Show TermChat version")
+	initFlag := flag.Bool("init", false, "Initialize a .termchat/room.json project collab room in the current directory")
 	flag.Parse()
 
 	if *versionFlag || *vFlag {
 		fmt.Printf("TermChat %s (%s/%s)\n", system.AppVersion, runtime.GOOS, runtime.GOARCH)
+		os.Exit(0)
+	}
+
+	// Handle 'termchat init [room-name]' or -init flag
+	if *initFlag || (len(os.Args) > 1 && os.Args[1] == "init") {
+		roomName := ""
+		if len(os.Args) > 2 && os.Args[1] == "init" {
+			roomName = os.Args[2]
+		}
+		wsCfg, path, err := workspace.InitWorkspace("", "", roomName, *passFlag)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ERR] Failed to initialize project room: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("\n  ╔═══════════════════════════════════════════════════════╗\n")
+		fmt.Printf("  ║   🐙 Project Collab Room Initialized Successfully!    ║\n")
+		fmt.Printf("  ╚═══════════════════════════════════════════════════════╝\n\n")
+		fmt.Printf("  • Config File: %s\n", path)
+		if wsCfg.Repo != "" {
+			fmt.Printf("  • Repository:  %s\n", wsCfg.Repo)
+		}
+		fmt.Printf("  • Collab Room: %s\n", wsCfg.Room)
+		fmt.Printf("\n  👉 Commit .termchat/room.json to git so collaborators auto-join on 'git clone'!\n\n")
 		os.Exit(0)
 	}
 
@@ -114,9 +139,18 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Network error: %v\n", err)
 	}
 
-	// 6. Connect to Cloud Room if specified
+	// 6. Connect to Cloud Room or Auto-Join Project Workspace
 	if *roomFlag != "" {
 		mgr.ConnectRelay(*relayFlag, *roomFlag)
+	} else if wsCfg, _, err := workspace.FindWorkspace(""); err == nil && wsCfg.AutoConnect && wsCfg.Room != "" {
+		relayURL := *relayFlag
+		if wsCfg.Relay != "" && *relayFlag == "wss://termchat-o51d.onrender.com/ws" {
+			relayURL = wsCfg.Relay
+		}
+		if *passFlag == "" && wsCfg.Passphrase != "" {
+			mgr.SetEncryptionPassphrase(wsCfg.Passphrase)
+		}
+		mgr.ConnectRelay(relayURL, wsCfg.Room)
 	}
 
 	// 7. Direct connect if specified in CLI

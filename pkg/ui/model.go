@@ -11,6 +11,7 @@ import (
 
 	"termchat/pkg/network"
 	"termchat/pkg/system"
+	"termchat/pkg/workspace"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -796,7 +797,7 @@ func (m *Model) handleTabComplete() {
 		cmdList := []string{
 			"/theme", "/themes", "/reply", "/status", "/afk", "/topic",
 			"/pin", "/pins", "/unpin", "/copy", "/files", "/browse",
-			"/clip", "/sidebar", "/clear", "/nick", "/room", "/update",
+			"/clip", "/sidebar", "/clear", "/nick", "/room", "/init", "/repo", "/update",
 			"/help", "/qr", "/send", "/dir", "/connect",
 		}
 		lowerVal := strings.ToLower(val)
@@ -1557,6 +1558,42 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			m.manager.SetEncryptionPassphrase("")
 			m.addSystemMsg(fmt.Sprintf("[ROOM] Switched to Room #%s", newRoom))
 		}
+
+	case "/init", "/repo", "/workspace":
+		roomName := ""
+		pass := ""
+		if len(parts) > 1 {
+			if parts[1] == "init" && len(parts) > 2 {
+				roomName = parts[2]
+				if len(parts) > 3 {
+					pass = parts[3]
+				}
+			} else if parts[1] != "init" {
+				roomName = parts[1]
+				if len(parts) > 2 {
+					pass = parts[2]
+				}
+			}
+		}
+
+		wsCfg, path, err := workspace.InitWorkspace("", "", roomName, pass)
+		if err != nil {
+			m.addSystemMsg(fmt.Sprintf("[ERR] Failed to initialize project room: %v", err))
+			return
+		}
+
+		// Connect to the newly initialized room immediately
+		if wsCfg.Passphrase != "" {
+			m.manager.SetEncryptionPassphrase(wsCfg.Passphrase)
+		}
+		m.manager.ConnectRelay(wsCfg.Relay, wsCfg.Room)
+
+		repoInfo := ""
+		if wsCfg.Repo != "" {
+			repoInfo = fmt.Sprintf("\n• Repository: %s", wsCfg.Repo)
+		}
+		m.addSystemMsg(fmt.Sprintf("[WORKSPACE] 🐙 Project Collab Room Initialized!\n• Config File: %s%s\n• Collab Room: #%s\n👉 Commit .termchat/room.json to git so teammates auto-join on 'git clone'!", path, repoInfo, wsCfg.Room))
+
 
 	case "/clear":
 		m.messages = []ChatMessage{}
