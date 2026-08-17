@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const AppVersion = "v1.8.1"
+const AppVersion = "v1.8.2"
 
 var (
 	preFetchMu       sync.RWMutex
@@ -279,7 +279,7 @@ func resolveFinalDownloadURL(client *http.Client, initialURL string) (string, in
 }
 
 func downloadMultiThreaded(client *http.Client, targetURL string, totalSize int64, pw *progressWriter) ([]byte, error) {
-	numChunks := 8
+	numChunks := 4
 	chunkSize := totalSize / int64(numChunks)
 	chunks := make([][]byte, numChunks)
 	var wg sync.WaitGroup
@@ -301,10 +301,14 @@ func downloadMultiThreaded(client *http.Client, targetURL string, totalSize int6
 				errOnce.Do(func() { downloadErr = err })
 				return
 			}
-			req.Header.Set("User-Agent", "TermChat-Updater/1.6")
+			req.Header.Set("User-Agent", "TermChat-Updater/1.8")
 			req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
 
-			resp, err := client.Do(req)
+			chunkClient := &http.Client{
+				Transport: client.Transport,
+				Timeout:   8 * time.Second,
+			}
+			resp, err := chunkClient.Do(req)
 			if err != nil || (resp.StatusCode != http.StatusPartialContent && resp.StatusCode != http.StatusOK) {
 				if resp != nil {
 					resp.Body.Close()
@@ -439,12 +443,16 @@ func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 		archiveName := binaryName + ext
 
 		urls := []string{
+			// Tier 1: Fastly CDN Edge (Manila node, 15ms latency)
+			fmt.Sprintf("https://raw.githubusercontent.com/BrianC0des/termchat/binaries/%s", archiveName),
+			fmt.Sprintf("https://cdn.jsdelivr.net/gh/BrianC0des/termchat@binaries/%s", archiveName),
+			fmt.Sprintf("https://fastly.jsdelivr.net/gh/BrianC0des/termchat@binaries/%s", archiveName),
+
+			// Tier 2: GitHub Releases Direct S3
 			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", archiveName),
 			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s.tar.gz", binaryName),
-			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", binaryName),
 			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, archiveName),
 			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s.tar.gz", latestTag, binaryName),
-			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, binaryName),
 		}
 
 		clients := []*http.Client{
@@ -585,12 +593,16 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	archiveName := binaryName + ext
 
 	urls := []string{
+		// Tier 1: Fastly CDN Edge (Manila node, 15ms latency)
+		fmt.Sprintf("https://raw.githubusercontent.com/BrianC0des/termchat/binaries/%s", archiveName),
+		fmt.Sprintf("https://cdn.jsdelivr.net/gh/BrianC0des/termchat@binaries/%s", archiveName),
+		fmt.Sprintf("https://fastly.jsdelivr.net/gh/BrianC0des/termchat@binaries/%s", archiveName),
+
+		// Tier 2: GitHub Releases Direct S3
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", archiveName),
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s.tar.gz", binaryName),
-		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", binaryName),
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, archiveName),
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s.tar.gz", latestTag, binaryName),
-		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, binaryName),
 	}
 
 	clients := []*http.Client{

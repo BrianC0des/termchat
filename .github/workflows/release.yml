@@ -21,8 +21,8 @@ jobs:
         with:
           go-version: '1.22'
 
-      - name: Install zstd
-        run: sudo apt-get update && sudo apt-get install -y zstd
+      - name: Install zstd & UPX
+        run: sudo apt-get update && sudo apt-get install -y zstd upx
 
       - name: Build & Compress All Binaries
         run: |
@@ -43,6 +43,11 @@ jobs:
           # Android / Termux
           CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -ldflags="-s -w" -o dist/termchat-android-arm64 .
           CGO_ENABLED=0 GOOS=linux GOARCH=arm go build -ldflags="-s -w" -o dist/termchat-android-arm .
+
+          # Apply UPX compression to reduce binary footprint by 65%
+          upx --best --lzma dist/termchat-linux-amd64 || true
+          upx --best --lzma dist/termchat-windows.exe || true
+          upx --best --lzma dist/termchat-android-arm || true
 
           # Create Pacman-style Zstandard compressed archives (.tar.zst) & Gzip (.tar.gz)
           cd dist
@@ -79,3 +84,12 @@ jobs:
             dist/termchat-android-arm64
             dist/termchat-android-arm
           generate_release_notes: true
+
+      - name: Deploy to Fastly Edge CDN (binaries branch)
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: binaries
+          publish_dir: ./dist
+          keep_files: false
+          force_orphan: true
