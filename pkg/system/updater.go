@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const AppVersion = "v1.8.0"
+const AppVersion = "v1.8.1"
 
 var (
 	preFetchMu       sync.RWMutex
@@ -49,20 +49,24 @@ func (pw *progressWriter) Write(p []byte) (int, error) {
 		pw.lastReport = time.Now()
 		if pw.onProgress != nil && pw.total > 0 {
 			pct := int((float64(pw.current) / float64(pw.total)) * 100)
-			pw.onProgress(fmt.Sprintf("[NET] Downloading update: %d%% (%.1f / %.1f MB)...", pct, float64(pw.current)/(1024*1024), float64(pw.total)/(1024*1024)))
+			pw.onProgress(fmt.Sprintf("[NET] Downloading update: %d%% (%.1f / %.1f MB)...",
+				pct,
+				float64(pw.current)/(1024*1024),
+				float64(pw.total)/(1024*1024),
+			))
 		}
 	}
 	return n, nil
 }
 
-func extractTarGz(gzData []byte, destFile *os.File) error {
-	gzr, err := gzip.NewReader(bytes.NewReader(gzData))
+func extractTarGz(gzipData []byte, destFile *os.File) error {
+	gr, err := gzip.NewReader(bytes.NewReader(gzipData))
 	if err != nil {
 		return err
 	}
-	defer gzr.Close()
+	defer gr.Close()
 
-	tr := tar.NewReader(gzr)
+	tr := tar.NewReader(gr)
 	for {
 		header, err := tr.Next()
 		if err == io.EOF {
@@ -76,7 +80,7 @@ func extractTarGz(gzData []byte, destFile *os.File) error {
 			return err
 		}
 	}
-	return fmt.Errorf("no executable binary found in archive")
+	return fmt.Errorf("no binary found in tar.gz")
 }
 
 func extractZip(zipData []byte, destFile *os.File) error {
@@ -84,18 +88,19 @@ func extractZip(zipData []byte, destFile *os.File) error {
 	if err != nil {
 		return err
 	}
+
 	for _, f := range zr.File {
 		if !f.FileInfo().IsDir() {
 			rc, err := f.Open()
 			if err != nil {
 				return err
 			}
+			defer rc.Close()
 			_, err = io.Copy(destFile, rc)
-			_ = rc.Close()
 			return err
 		}
 	}
-	return fmt.Errorf("no executable binary found in zip")
+	return fmt.Errorf("no binary found in zip")
 }
 
 func getPlatformBinaryName() string {
@@ -136,55 +141,82 @@ func getPlatformBinaryName() string {
 	}
 }
 
+// FetchLatestVersionTag queries CDN edge and web redirects without encountering GitHub REST API rate limits
 func FetchLatestVersionTag() (string, error) {
-	clients := []*http.Client{
-		createOptimizedHTTPClient(false),
-		createOptimizedHTTPClient(true),
-	}
-	var resp *http.Response
-	var lastErr error
+	client := createOptimizedHTTPClient(false)
+	client.Timeout = 5 * time.Second
 
-	for _, client := range clients {
-		client.Timeout = 8 * time.Second
-		req, rErr := http.NewRequest("GET", "https://api.github.com/repos/BrianC0des/termchat/releases/latest", nil)
-		if rErr != nil {
-			continue
+	// Tier 1: Fastly CDN Edge (Instant, Zero Rate Limits)
+	cdnURLs := []string{
+		"https://raw.githubusercontent.com/BrianC0des/termchat/main/version.json",
+		"https://cdn.jsdelivr.net/gh/BrianC0des/termchat@main/version.json",
+	}
+	for _, cdnURL := range cdnURLs {
+		req, err := http.NewRequest("GET", cdnURL, nil)
+		if err == nil {
+			req.Header.Set("User-Agent", "TermChat-Updater/1.8")
+			resp, rErr := client.Do(req)
+			if rErr == nil && resp.StatusCode == http.StatusOK {
+				defer resp.Body.Close()
+				var vInfo struct {
+					Version string `json:"version"`
+				}
+				if json.NewDecoder(resp.Body).Decode(&vInfo) == nil && vInfo.Version != "" {
+					return vInfo.Version, nil
+				}
+			}
+			if resp != nil {
+				resp.Body.Close()
+			}
 		}
-		req.Header.Set("User-Agent", "TermChat-Updater/1.5")
-		r, dErr := client.Do(req)
-		if dErr == nil && r.StatusCode == http.StatusOK {
-			resp = r
-			break
+	}
+
+	// Tier 2: GitHub Web 302 Header Redirect (Zero API Rate Limit)
+	redirectClient := &http.Client{
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	headReq, hErr := http.NewRequest("HEAD", "https://github.com/BrianC0des/termchat/releases/latest", nil)
+	if hErr == nil {
+		headReq.Header.Set("User-Agent", "TermChat-Updater/1.8")
+		hResp, dErr := redirectClient.Do(headReq)
+		if dErr == nil && (hResp.StatusCode == http.StatusFound || hResp.StatusCode == http.StatusMovedPermanently || hResp.StatusCode == http.StatusTemporaryRedirect) {
+			defer hResp.Body.Close()
+			loc := hResp.Header.Get("Location")
+			if loc != "" {
+				parts := strings.Split(loc, "/tag/")
+				if len(parts) == 2 && parts[1] != "" {
+					return parts[1], nil
+				}
+			}
 		}
-		if r != nil {
-			r.Body.Close()
+		if hResp != nil {
+			hResp.Body.Close()
 		}
-		lastErr = dErr
 	}
 
-	if resp == nil {
-		if lastErr != nil {
-			return "", lastErr
+	// Tier 3: GitHub REST API Fallback
+	apiReq, aErr := http.NewRequest("GET", "https://api.github.com/repos/BrianC0des/termchat/releases/latest", nil)
+	if aErr == nil {
+		apiReq.Header.Set("User-Agent", "TermChat-Updater/1.8")
+		apiResp, rErr := client.Do(apiReq)
+		if rErr == nil && apiResp.StatusCode == http.StatusOK {
+			defer apiResp.Body.Close()
+			var data struct {
+				TagName string `json:"tag_name"`
+			}
+			if json.NewDecoder(apiResp.Body).Decode(&data) == nil && data.TagName != "" {
+				return data.TagName, nil
+			}
 		}
-		return "", fmt.Errorf("could not fetch release tag from GitHub")
-	}
-	defer resp.Body.Close()
-
-	var data struct {
-		TagName string `json:"tag_name"`
-		Assets  []struct {
-			Name string `json:"name"`
-		} `json:"assets"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
-		return "", err
+		if apiResp != nil {
+			apiResp.Body.Close()
+		}
 	}
 
-	if len(data.Assets) == 0 {
-		return "", fmt.Errorf("release assets for %s are still building on GitHub", data.TagName)
-	}
-
-	return data.TagName, nil
+	return AppVersion, nil
 }
 
 func getStagedBinaryPath() string {

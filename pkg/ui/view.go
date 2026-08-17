@@ -165,7 +165,11 @@ func (m *Model) View() string {
 
 	// 5. Input Line with Bottom-Right Version Display
 	prompt := InputPromptStyle.Render(fmt.Sprintf("%s@termchat:~$ ", m.manager.LocalName))
-	verBadge := lipgloss.NewStyle().Foreground(MutedColor).Bold(true).Render(fmt.Sprintf("v%s", system.AppVersion))
+	verStr := system.AppVersion
+	if !strings.HasPrefix(verStr, "v") {
+		verStr = "v" + verStr
+	}
+	verBadge := lipgloss.NewStyle().Foreground(MutedColor).Bold(true).Render(verStr)
 
 	m.textInput.Width = m.width - lipgloss.Width(prompt) - lipgloss.Width(verBadge) - 6
 	if m.textInput.Width < 10 {

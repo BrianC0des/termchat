@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
 	"termchat/pkg/network"
@@ -36,7 +37,14 @@ func main() {
 	passFlag := flag.String("pass", "", "Password / passphrase for AES-256 room encryption")
 	relayFlag := flag.String("relay", "wss://termchat-o51d.onrender.com/ws", "Cloud Relay WebSocket URL")
 	updateFlag := flag.Bool("update", false, "Self-update TermChat to the latest release")
+	versionFlag := flag.Bool("version", false, "Show TermChat version")
+	vFlag := flag.Bool("v", false, "Show TermChat version")
 	flag.Parse()
+
+	if *versionFlag || *vFlag {
+		fmt.Printf("TermChat %s (%s/%s)\n", system.AppVersion, runtime.GOOS, runtime.GOARCH)
+		os.Exit(0)
+	}
 
 	if *updateFlag {
 		msg, err := system.UpdateSelfWithProgress(func(progressMsg string) {
