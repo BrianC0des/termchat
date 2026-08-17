@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"runtime"
 	"strings"
-	"time"
 )
 
 type BatteryInfo struct {
@@ -126,44 +124,4 @@ func MediaControl(action string) (string, error) {
 		return fmt.Sprintf("[AUDIO] Termux Media: %s", action), nil
 	}
 	return "", fmt.Errorf("media control (playerctl) not found on this system")
-}
-
-// ExecuteCommand executes a remote shell command with safety limits
-func ExecuteCommand(cmdStr string) (string, error) {
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd", "/C", cmdStr)
-	} else {
-		cmd = exec.Command("sh", "-c", cmdStr)
-	}
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	timer := time.AfterFunc(10*time.Second, func() {
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-	})
-	defer timer.Stop()
-
-	err := cmd.Run()
-	out := strings.TrimSpace(stdout.String())
-	errOut := strings.TrimSpace(stderr.String())
-
-	if err != nil {
-		if errOut != "" {
-			return "", fmt.Errorf("%s (exit: %v)", errOut, err)
-		}
-		return "", err
-	}
-
-	if out == "" && errOut != "" {
-		return errOut, nil
-	}
-	if len(out) > 4000 {
-		out = out[:4000] + "\n...(truncated)"
-	}
-	return out, nil
 }

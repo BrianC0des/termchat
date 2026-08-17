@@ -131,13 +131,6 @@ type batteryMsg struct {
 	info       system.BatteryInfo
 }
 
-type execOutputMsg struct {
-	senderName string
-	cmd        string
-	output     string
-	isError    bool
-}
-
 func NewModel(mgr *network.Manager) *Model {
 	ti := textinput.New()
 	ti.Placeholder = "Type message, /help, /browse, /files, /reply, /room..."
@@ -499,11 +492,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.SetContent(m.renderMessages())
 		m.viewport.GotoBottom()
 
-		// Trigger AGY if mention received and AGY is locally available
-		if msg.senderID != "agy-bot" && (strings.Contains(strings.ToLower(msg.text), "@agy") || strings.HasPrefix(strings.ToLower(msg.text), "/agy")) {
-			m.handleAGYMention(msg.text)
-		}
-
 	case statusUpdateMsg:
 		if m.userStatuses == nil {
 			m.userStatuses = make(map[string]string)
@@ -555,13 +543,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 		m.viewport.SetContent(m.renderMessages())
 		m.viewport.GotoBottom()
-
-	case execOutputMsg:
-		status := "[OK] Output"
-		if msg.isError {
-			status = "[ERR] Failed"
-		}
-		m.addSystemMsg(fmt.Sprintf("[EXEC] %s from %s for `%s`:\n```\n%s\n```", status, msg.senderName, msg.cmd, msg.output))
 
 	case fileProgressMsg:
 		p := msg.progress
@@ -751,10 +732,6 @@ func (m *Model) handleInput(text string) {
 	m.trimMessagesBuffer()
 	m.viewport.SetContent(m.renderMessages())
 	m.viewport.GotoBottom()
-
-	if strings.Contains(strings.ToLower(text), "@agy") || strings.HasPrefix(strings.ToLower(text), "/agy") {
-		m.handleAGYMention(text)
-	}
 }
 
 func (m *Model) handleSlashCommand(cmdStr string) {
@@ -1145,22 +1122,6 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		_ = m.manager.SendPacket(p)
 		m.addSystemMsg(fmt.Sprintf("[AUDIO] Sent media command: %s", action))
 
-	case "/exec", "/sh":
-		if len(parts) < 2 {
-			m.addSystemMsg("Usage: /exec <command> (e.g., /exec uname -a)")
-			return
-		}
-		shCmd := strings.Join(parts[1:], " ")
-		p := &network.Packet{
-			Type:      network.MsgTypeExecReq,
-			SenderID:  m.manager.LocalID,
-			Sender:    m.manager.LocalName,
-			Timestamp: time.Now(),
-			Content:   shCmd,
-		}
-		_ = m.manager.SendPacket(p)
-		m.addSystemMsg(fmt.Sprintf("[EXEC] Running remote command: `%s`...", shCmd))
-
 	case "/update", "/upgrade":
 		go func() {
 			msg, err := system.UpdateSelfWithProgress(func(progressMsg string) {
@@ -1550,14 +1511,6 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		}
 		m.addSystemMsg(strings.TrimRight(sb.String(), "\n"))
 
-	case "/agy", "/ai":
-		if len(parts) < 2 {
-			m.addSystemMsg("Usage: /agy <your question or prompt>  (or mention @agy in any chat)")
-			return
-		}
-		prompt := strings.Join(parts[1:], " ")
-		m.handleInput(fmt.Sprintf("@agy %s", prompt))
-
 	case "/quit", "/exit":
 		m.manager.Stop()
 		os.Exit(0)
@@ -1565,54 +1518,6 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 	default:
 		m.addSystemMsg(fmt.Sprintf("[?] Unknown command '%s'. Type /help for available commands.", command))
 	}
-}
-
-func (m *Model) handleAGYMention(text string) {
-	if !system.IsAGYInstalled() {
-		return
-	}
-
-	// Clean prompt
-	cleanPrompt := strings.TrimSpace(text)
-	// Remove @agy prefix if present
-	for _, prefix := range []string{"@agy", "@AGY", "/agy", "/AGY", "@ai", "@AI"} {
-		cleanPrompt = strings.TrimPrefix(cleanPrompt, prefix)
-	}
-	cleanPrompt = strings.TrimSpace(cleanPrompt)
-	if cleanPrompt == "" {
-		cleanPrompt = "Hello! How can I help you today?"
-	}
-
-	m.addSystemMsg("[AI] AGY is thinking...")
-	go func() {
-		reply, err := system.QueryAGY(cleanPrompt)
-		if err != nil {
-			errText := fmt.Sprintf("[WARN] AGY error: %v", err)
-			_ = m.manager.SendBotChat("[AI] AGY", errText)
-			m.messages = append(m.messages, ChatMessage{
-				SenderID:   "agy-bot",
-				SenderName: "[AI] AGY",
-				Content:    errText,
-				Timestamp:  time.Now(),
-			})
-		} else {
-			_ = m.manager.SendBotChat("[AI] AGY", reply)
-			m.messages = append(m.messages, ChatMessage{
-				SenderID:   "agy-bot",
-				SenderName: "[AI] AGY",
-				Content:    reply,
-				Timestamp:  time.Now(),
-			})
-			system.AppendHistory(m.manager.RoomName, system.HistoryEntry{
-				SenderID:   "agy-bot",
-				SenderName: "[AI] AGY",
-				Content:    reply,
-				Timestamp:  time.Now(),
-			})
-		}
-		m.viewport.SetContent(m.renderMessages())
-		m.viewport.GotoBottom()
-	}()
 }
 
 func (m *Model) addSystemMsg(text string) {
@@ -1685,10 +1590,7 @@ func (m *Model) renderMessages() string {
 				renderedContent = bodyStyle.Render(renderedContent)
 			}
 
-			if msg.SenderName == "[AI] AGY" || strings.Contains(msg.SenderName, "AGY") {
-				nameTag := SenderBotStyle.Render(fmt.Sprintf("[%s]", msg.SenderName))
-				sb.WriteString(fmt.Sprintf("%s %s:\n%s\n\n", prefix, nameTag, renderedContent))
-			} else if msg.IsMe {
+			if msg.IsMe {
 				nameTag := SenderMeStyle.Render(fmt.Sprintf("[%s]", msg.SenderName))
 				sb.WriteString(fmt.Sprintf("%s %s: %s\n\n", prefix, nameTag, renderedContent))
 			} else {
@@ -1751,14 +1653,6 @@ func SetupEventBridge(p *tea.Program) network.NetworkEvents {
 		},
 		OnPin: func(senderName, pinText string) {
 			p.Send(pinUpdateMsg{senderName: senderName, pinText: pinText})
-		},
-		OnExecOutput: func(senderName, cmd, output string, isError bool) {
-			p.Send(execOutputMsg{
-				senderName: senderName,
-				cmd:        cmd,
-				output:     output,
-				isError:    isError,
-			})
 		},
 	}
 }

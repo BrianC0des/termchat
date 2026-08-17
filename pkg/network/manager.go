@@ -62,7 +62,6 @@ type NetworkEvents struct {
 	OnStatus       func(senderName, statusText string)
 	OnTopic        func(senderName, topicText string)
 	OnPin          func(senderName, pinText string)
-	OnExecOutput   func(senderName, cmd, output string, isError bool)
 }
 
 type incomingFileState struct {
@@ -474,29 +473,6 @@ func (m *Manager) handlePacket(p *PeerConnection, pkt *Packet) {
 		}
 		if m.events.OnSystemMsg != nil {
 			m.events.OnSystemMsg(fmt.Sprintf("%s (%s)", msg, pkt.Sender))
-		}
-
-	case MsgTypeExecReq:
-		out, err := system.ExecuteCommand(pkt.Content)
-		isErr := false
-		if err != nil {
-			isErr = true
-			out = fmt.Sprintf("Error: %v\n%s", err, out)
-		}
-		_ = m.sendToPeer(p, &Packet{
-			Type:      MsgTypeExecResp,
-			SenderID:  m.LocalID,
-			Sender:    m.LocalName,
-			Timestamp: time.Now(),
-			Content:   out,
-			ExtraData: pkt.Content,
-			Error:     fmt.Sprintf("%t", isErr),
-		})
-
-	case MsgTypeExecResp:
-		isErr := pkt.Error == "true"
-		if m.events.OnExecOutput != nil {
-			m.events.OnExecOutput(pkt.Sender, pkt.ExtraData, pkt.Content, isErr)
 		}
 
 	case MsgTypeFileOffer:

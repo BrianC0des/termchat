@@ -390,6 +390,8 @@ func (m *Model) renderHelpView() string {
   %s %s
   %s %s
   %s %s
+  %s %s
+  %s %s
 
   %s
 `,
@@ -399,6 +401,8 @@ func (m *Model) renderHelpView() string {
 		HelpKeyStyle.Render("Ctrl+F / /files  "), HelpDescStyle.Render("Open Shared Files Vault sidebar to select & download"),
 		HelpKeyStyle.Render("/get <url|idx>   "), HelpDescStyle.Render("Download file from cloud URL or # vault index number"),
 		HelpKeyStyle.Render("/room <name> [pw]"), HelpDescStyle.Render("Switch cloud relay room with optional E2E password"),
+		HelpKeyStyle.Render("/expire <dur|off>"), HelpDescStyle.Render("Set room self-destruct countdown timer (e.g. 30m, 1h)"),
+		HelpKeyStyle.Render("/autodelete <dur>"), HelpDescStyle.Render("Set auto-deleting disappearing messages (30s, 5m)"),
 		HelpKeyStyle.Render("/lan / /offline  "), HelpDescStyle.Render("Switch to offline local Wi-Fi P2P mode (50-80 MB/s)"),
 		HelpKeyStyle.Render("/nick <name>     "), HelpDescStyle.Render("Set and permanently save default user nickname"),
 		HelpKeyStyle.Render("/reply <#> <msg> "), HelpDescStyle.Render("Reply to specific message ID in chat"),

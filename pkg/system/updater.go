@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const AppVersion = "v1.8.4"
+const AppVersion = "v1.8.5"
 
 var (
 	preFetchMu       sync.RWMutex

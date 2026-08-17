@@ -27,8 +27,6 @@ const (
 	MsgTypeRing        MsgType = "ring"
 	MsgTypeOpenUrl     MsgType = "open_url"
 	MsgTypeMedia       MsgType = "media"
-	MsgTypeExecReq     MsgType = "exec_req"
-	MsgTypeExecResp    MsgType = "exec_resp"
 	MsgTypeEncrypted   MsgType = "encrypted"
 	MsgTypeStatus      MsgType = "status"
 	MsgTypeTopic       MsgType = "topic"

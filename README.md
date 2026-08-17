@@ -74,8 +74,8 @@ termchat
 | `/pin <#>` | | Pin important message to top header banner |
 | `/clip` or `/c` | | Push your clipboard directly to connected peers |
 | `/theme <name>` | | Switch UI theme (`catppuccin`, `dracula`, `nord`, `matrix`, etc.) |
-| `/sidebar` | `F3` / `Ctrl+B` | Toggle sidebar layout (Normal, Wide, Zen Fullscreen) |
-| `@agy <prompt>` | | Ask Antigravity AI anything directly in the chatroom |
+| `/expire <dur>` | `-ttl` | Set self-destruct countdown timer (e.g. `/expire 30m`, `/expire 1h`) |
+| `/autodelete <dur>` | `-autodelete` | Enable disappearing auto-delete messages (e.g. `/autodelete 5m`) |
 | `/peers` / `/ip` | | Show room members online and local network IP |
 | `/update` | | 1-Click Self-Update TermChat to the latest version |
 | `/help` | `F1` | Open in-app command cheatsheet |
@@ -85,7 +85,8 @@ termchat
 
 ## :: Security & Privacy ::
 - **End-to-End Encryption**: When a room has a password (`-pass` or `/auth`), messages and files are encrypted with **AES-256-GCM** before leaving your device.
-- **Zero Server Logging**: The relay server acts purely as a stateless WebSocket router and cannot decrypt any password-protected traffic.
+- **Visual Key Fingerprint**: Telegram-style 4-emoji verification (`🦊 🚀 💎 ⚡`) to prevent MITM attacks.
+- **Zero Server Logging & RAM Wipes**: The relay server acts purely as a stateless router. Self-destructing rooms zero-fill RAM buffers and purge history upon expiration.
 
 ---
 

@@ -120,14 +120,6 @@ func main() {
 	defer conn.Close()
 
 	switch action {
-	case "exec", "sh", "run":
-		if len(args) < 2 {
-			fmt.Fprintln(os.Stderr, "Usage: termchat-cli exec \"<command>\"")
-			os.Exit(1)
-		}
-		cmdToRun := strings.Join(args[1:], " ")
-		runRemoteExec(conn, reader, writer, cmdToRun, *timeoutFlag)
-
 	case "battery", "batt":
 		getRemoteBattery(conn, reader, writer, *timeoutFlag)
 
@@ -174,48 +166,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Unknown command '%s'\n", action)
 		printUsage()
 		os.Exit(1)
-	}
-}
-
-func runRemoteExec(conn net.Conn, reader *bufio.Reader, writer *bufio.Writer, cmdStr string, timeout time.Duration) {
-	req := &network.Packet{
-		Type:      network.MsgTypeExecReq,
-		SenderID:  "agy",
-		Sender:    "Antigravity",
-		Timestamp: time.Now(),
-		Content:   cmdStr,
-	}
-
-	data, _ := network.EncodePacket(req)
-	_, _ = writer.Write(data)
-	_ = writer.Flush()
-
-	_ = conn.SetReadDeadline(time.Now().Add(timeout))
-
-	for {
-		line, err := reader.ReadBytes('\n')
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error waiting for response: %v\n", err)
-			os.Exit(1)
-		}
-
-		pkt, err := network.DecodePacket(line)
-		if err != nil {
-			continue
-		}
-
-		if pkt.Type == network.MsgTypeExecResp {
-			if pkt.Error == "true" {
-				fmt.Fprintln(os.Stderr, pkt.Content)
-				os.Exit(1)
-			} else {
-				fmt.Print(pkt.Content)
-				if !strings.HasSuffix(pkt.Content, "\n") {
-					fmt.Println()
-				}
-				os.Exit(0)
-			}
-		}
 	}
 }
 
