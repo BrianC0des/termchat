@@ -106,7 +106,10 @@ jobs:
           token = os.environ.get('HF_TOKEN')
           if token:
               api = HfApi(token=token)
-              repo_id = 'BrianC0des/termchat-releases'
+              user_info = api.whoami()
+              username = user_info.get('name', 'devchan123')
+              repo_id = f'{username}/termchat-releases'
+              print(f'Syncing to Hugging Face repo: {repo_id}')
               try:
                   api.create_repo(repo_id=repo_id, repo_type='dataset', private=False, exist_ok=True)
               except Exception as e:
@@ -116,6 +119,6 @@ jobs:
                   repo_id=repo_id,
                   repo_type='dataset'
               )
-              print('Successfully published to Hugging Face Cloudflare Edge CDN!')
+              print(f'Successfully published to https://huggingface.co/datasets/{repo_id}!')
           "
 
