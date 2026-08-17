@@ -42,11 +42,11 @@ func TestInitAndFindWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, path, err := InitWorkspace(tmpDir, "BrianC0des/test-repo", "test-room", "secret123")
+	cfg, path, err := InitWorkspace(tmpDir, "BrianC0des/test-repo", "test-room", "secret123", "SHA256:abcd1234", "devchan")
 	if err != nil {
 		t.Fatalf("InitWorkspace failed: %v", err)
 	}
-	if cfg.Room != "test-room" || cfg.Repo != "BrianC0des/test-repo" {
+	if cfg.Room != "test-room" || cfg.Repo != "BrianC0des/test-repo" || cfg.CreatorFingerprint != "SHA256:abcd1234" {
 		t.Errorf("InitWorkspace cfg mismatch: %+v", cfg)
 	}
 	if _, err := os.Stat(path); err != nil {

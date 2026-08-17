@@ -1439,6 +1439,23 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			return
 		}
 		room := m.manager.RoomName
+
+		// Check room creator authorization if bound to a project workspace
+		if wsCfg, _, err := workspace.FindWorkspace(""); err == nil && wsCfg.Room == room && wsCfg.CreatorFingerprint != "" {
+			myFp := ""
+			if m.manager.Identity != nil {
+				myFp = m.manager.Identity.Fingerprint()
+			}
+			if myFp != wsCfg.CreatorFingerprint {
+				creatorStr := wsCfg.CreatorName
+				if creatorStr == "" {
+					creatorStr = wsCfg.CreatorFingerprint
+				}
+				m.setToast(fmt.Sprintf("🛡️ [AUTH] Only the room creator (@%s) can destroy this room. Use '/room leave' to exit.", creatorStr), 6*time.Second)
+				return
+			}
+		}
+
 		if len(parts) >= 2 {
 			codeArg := strings.TrimSpace(parts[1])
 			if (m.destroyCode != "" && strings.EqualFold(codeArg, m.destroyCode)) || strings.EqualFold(codeArg, room) || strings.EqualFold(codeArg, "confirm") {
@@ -1729,7 +1746,11 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			}
 		}
 
-		wsCfg, path, err := workspace.InitWorkspace("", "", roomName, pass)
+		fp := ""
+		if m.manager.Identity != nil {
+			fp = m.manager.Identity.Fingerprint()
+		}
+		wsCfg, path, err := workspace.InitWorkspace("", "", roomName, pass, fp, m.manager.LocalName)
 		if err != nil {
 			m.addSystemMsg(fmt.Sprintf("[ERR] Failed to initialize project room: %v", err))
 			return

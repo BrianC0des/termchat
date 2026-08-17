@@ -53,11 +53,17 @@ func main() {
 
 	// Handle 'termchat init [room-name]' or -init flag
 	if *initFlag || (len(os.Args) > 1 && os.Args[1] == "init") {
+		cfg := system.LoadConfig()
 		roomName := ""
 		if len(os.Args) > 2 && os.Args[1] == "init" {
 			roomName = os.Args[2]
 		}
-		wsCfg, path, err := workspace.InitWorkspace("", "", roomName, *passFlag)
+		ident, _ := system.GetOrCreateIdentity()
+		fp := ""
+		if ident != nil {
+			fp = ident.Fingerprint()
+		}
+		wsCfg, path, err := workspace.InitWorkspace("", "", roomName, *passFlag, fp, cfg.Nickname)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[ERR] Failed to initialize project room: %v\n", err)
 			os.Exit(1)

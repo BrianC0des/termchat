@@ -12,12 +12,14 @@ import (
 
 // RoomConfig defines project-bound collab room metadata
 type RoomConfig struct {
-	Repo        string          `json:"repo,omitempty"`
-	Room        string          `json:"room"`
-	Passphrase  string          `json:"passphrase,omitempty"`
-	Relay       string          `json:"relay,omitempty"`
-	AutoConnect bool            `json:"auto_connect"`
-	Features    map[string]bool `json:"features,omitempty"`
+	Repo               string          `json:"repo,omitempty"`
+	Room               string          `json:"room"`
+	Passphrase         string          `json:"passphrase,omitempty"`
+	Relay              string          `json:"relay,omitempty"`
+	AutoConnect        bool            `json:"auto_connect"`
+	CreatorFingerprint string          `json:"creator_fingerprint,omitempty"`
+	CreatorName        string          `json:"creator_name,omitempty"`
+	Features           map[string]bool `json:"features,omitempty"`
 }
 
 const (
@@ -61,7 +63,6 @@ func FindWorkspace(startDir string) (*RoomConfig, string, error) {
 		}
 		curr = parent
 	}
-
 	return nil, "", errors.New("no termchat project workspace found")
 }
 
@@ -82,7 +83,7 @@ func LoadConfig(filePath string) (*RoomConfig, error) {
 }
 
 // InitWorkspace creates .termchat/room.json in targetDir
-func InitWorkspace(targetDir, repo, room, pass string) (*RoomConfig, string, error) {
+func InitWorkspace(targetDir, repo, room, pass, creatorFingerprint, creatorName string) (*RoomConfig, string, error) {
 	if targetDir == "" {
 		var err error
 		targetDir, err = os.Getwd()
@@ -106,11 +107,13 @@ func InitWorkspace(targetDir, repo, room, pass string) (*RoomConfig, string, err
 	}
 
 	cfg := RoomConfig{
-		Repo:        repo,
-		Room:        room,
-		Passphrase:  pass,
-		Relay:       "wss://termchat-o51d.onrender.com/ws",
-		AutoConnect: true,
+		Repo:               repo,
+		Room:               room,
+		Passphrase:         pass,
+		Relay:              "wss://termchat-o51d.onrender.com/ws",
+		AutoConnect:        true,
+		CreatorFingerprint: creatorFingerprint,
+		CreatorName:        creatorName,
 		Features: map[string]bool{
 			"git_diff_sharing": true,
 			"ci_alerts":        true,
