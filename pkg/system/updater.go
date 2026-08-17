@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const AppVersion = "v1.8.3"
+const AppVersion = "v1.8.4"
 
 var (
 	preFetchMu       sync.RWMutex
@@ -139,6 +139,21 @@ func getPlatformBinaryName() string {
 	default:
 		return "termchat-linux-amd64"
 	}
+}
+
+func getPlatformArchiveName() string {
+	goos := runtime.GOOS
+	goarch := runtime.GOARCH
+
+	if goos == "windows" {
+		if goarch == "arm64" {
+			return "termchat-windows-arm64.zip"
+		}
+		return "termchat-windows.zip"
+	}
+
+	binaryName := getPlatformBinaryName()
+	return binaryName + ".tar.zst"
 }
 
 // FetchLatestVersionTag queries CDN edge and web redirects without encountering GitHub REST API rate limits
@@ -436,11 +451,7 @@ func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 		}()
 
 		binaryName := getPlatformBinaryName()
-		ext := ".tar.zst"
-		if runtime.GOOS == "windows" {
-			ext = ".zip"
-		}
-		archiveName := binaryName + ext
+		archiveName := getPlatformArchiveName()
 
 		urls := []string{
 			// Tier 1: Fastly CDN Edge (Manila node, 15ms latency)
@@ -450,8 +461,9 @@ func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 
 			// Tier 2: GitHub Releases Direct S3
 			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", archiveName),
-			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s.tar.gz", binaryName),
+			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", binaryName),
 			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, archiveName),
+			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, binaryName),
 			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s.tar.gz", latestTag, binaryName),
 		}
 
@@ -586,11 +598,7 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	}
 
 	binaryName := getPlatformBinaryName()
-	ext := ".tar.zst"
-	if runtime.GOOS == "windows" {
-		ext = ".zip"
-	}
-	archiveName := binaryName + ext
+	archiveName := getPlatformArchiveName()
 
 	urls := []string{
 		// Tier 1: Fastly CDN Edge (Manila node, 15ms latency)
@@ -600,8 +608,9 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 
 		// Tier 2: GitHub Releases Direct S3
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", archiveName),
-		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s.tar.gz", binaryName),
+		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", binaryName),
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, archiveName),
+		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, binaryName),
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s.tar.gz", latestTag, binaryName),
 	}
 

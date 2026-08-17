@@ -125,7 +125,7 @@ func initialModel() model {
 
 	return model{
 		relayURL:    "wss://termchat-o51d.onrender.com/ws",
-		latestTag:   "v1.8.3",
+		latestTag:   "v1.8.4",
 		commitHash:  "main",
 		ghStatus:    "Syncing telemetry...",
 		platforms:   defaultPlatforms,
