@@ -388,8 +388,8 @@ func (m *Model) renderSidebar(peers []network.PeerConnection, width int) string 
 }
 
 func (m *Model) renderHelpView() string {
-	boxWidth := min(m.width-4, 78)
-	boxHeight := min(m.height-2, 28)
+	boxWidth := min(m.width-4, 82)
+	boxHeight := min(m.height-2, 32)
 
 	helpBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -398,22 +398,14 @@ func (m *Model) renderHelpView() string {
 		Width(boxWidth).
 		Height(boxHeight)
 
-	title := TitleStyle.Render(":: TERMCHAT COMMAND CHEATSHEET ::")
-	content := fmt.Sprintf(`
+	title := TitleStyle.Render(":: TERMCHAT COMMAND & KEYBOARD SHORTCUTS ::")
+	sectionDev := lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render("🐙 DEVELOPER COLLAB & GIT:")
+	sectionRoom := lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).Render("💬 ROOMS & MESSAGING:")
+	sectionFiles := lipgloss.NewStyle().Foreground(AccentColor).Bold(true).Render("📁 FILES & NAVIGATION:")
+
+	content := fmt.Sprintf(`%s
+
 %s
-
-  %s %s
-  %s %s
-  %s %s
-  %s %s
-  %s %s
-  %s %s
-  %s %s
-  %s %s
-  %s %s
-  %s %s
-  %s %s
-  %s %s
   %s %s
   %s %s
   %s %s
@@ -422,28 +414,49 @@ func (m *Model) renderHelpView() string {
   %s %s
   %s %s
 
-  %s
-`,
+%s
+  %s %s
+  %s %s
+  %s %s
+  %s %s
+  %s %s
+  %s %s
+
+%s
+  %s %s
+  %s %s
+  %s %s
+  %s %s
+  %s %s
+  %s %s
+
+  %s`,
 		title,
-		HelpKeyStyle.Render("Ctrl+O / /browse "), HelpDescStyle.Render("Interactive TUI file explorer to send files"),
-		HelpKeyStyle.Render("/send <file> [exp]"), HelpDescStyle.Render("Send file/folder with optional expiration (10m, 1h, 1d, 7d)"),
-		HelpKeyStyle.Render("Ctrl+F / /files  "), HelpDescStyle.Render("Open Shared Files Vault sidebar to select & download"),
-		HelpKeyStyle.Render("/get <url|idx>   "), HelpDescStyle.Render("Download file from cloud URL or # vault index number"),
-		HelpKeyStyle.Render("/room <name> [pw]"), HelpDescStyle.Render("Switch cloud relay room with optional E2E password"),
-		HelpKeyStyle.Render("/expire <dur|off>"), HelpDescStyle.Render("Set room self-destruct countdown timer (e.g. 30m, 1h)"),
-		HelpKeyStyle.Render("/autodelete <dur>"), HelpDescStyle.Render("Set auto-deleting disappearing messages (30s, 5m)"),
-		HelpKeyStyle.Render("/lan / /offline  "), HelpDescStyle.Render("Switch to offline local Wi-Fi P2P mode (50-80 MB/s)"),
-		HelpKeyStyle.Render("/nick <name>     "), HelpDescStyle.Render("Set and permanently save default user nickname"),
-		HelpKeyStyle.Render("/reply <#> <msg> "), HelpDescStyle.Render("Reply to specific message ID in chat"),
-		HelpKeyStyle.Render("/copy <#>        "), HelpDescStyle.Render("Copy specific message text to system clipboard"),
-		HelpKeyStyle.Render("/pin <#>         "), HelpDescStyle.Render("Pin important message to the top header banner"),
-		HelpKeyStyle.Render("/clip / /c       "), HelpDescStyle.Render("Sync current system clipboard content with peers"),
-		HelpKeyStyle.Render("F3 / Ctrl+B      "), HelpDescStyle.Render("Toggle sidebar (Normal, Wide, Zen Fullscreen)"),
-		HelpKeyStyle.Render("Ctrl+E / /fold   "), HelpDescStyle.Render("Toggle Discord-style folding/expansion for code blocks"),
-		HelpKeyStyle.Render("/theme <name>    "), HelpDescStyle.Render("Switch color theme (catppuccin, dracula, nord, matrix, etc.)"),
-		HelpKeyStyle.Render("/dir <path>      "), HelpDescStyle.Render("Change destination directory for incoming downloads"),
-		HelpKeyStyle.Render("/qr              "), HelpDescStyle.Render("Display ASCII QR Code for fast mobile pairing"),
-		HelpKeyStyle.Render("/clear / /quit   "), HelpDescStyle.Render("Clear message buffer / Quit TermChat"),
+		sectionDev,
+		HelpKeyStyle.Render("/diff / /patch   "), HelpDescStyle.Render("Broadcast uncommitted Git diff card (#patch-xxxx)"),
+		HelpKeyStyle.Render("/apply <id>      "), HelpDescStyle.Render("Safely apply patch directly to your local workspace"),
+		HelpKeyStyle.Render("/branch /checkout"), HelpDescStyle.Render("Inspect current git branch or switch branches (/switch)"),
+		HelpKeyStyle.Render("/pr / /issue / /ci"), HelpDescStyle.Render("GitHub PR cards, issue previews & live CI/CD status"),
+		HelpKeyStyle.Render("Ctrl+X / /editor "), HelpDescStyle.Render("Open $EDITOR (nvim/nano/vim) to compose code/notes"),
+		HelpKeyStyle.Render("Shift+Enter      "), HelpDescStyle.Render("Insert newline (multiline input without sending)"),
+		HelpKeyStyle.Render("Ctrl+E / F4      "), HelpDescStyle.Render("Toggle Discord-style folding on code blocks"),
+
+		sectionRoom,
+		HelpKeyStyle.Render("/init [room]     "), HelpDescStyle.Render("Scaffold .termchat/room.json for team auto-join on clone"),
+		HelpKeyStyle.Render("/room <name> [pw]"), HelpDescStyle.Render("Join 24/7 cloud room with optional AES-256 password"),
+		HelpKeyStyle.Render("/invite / /qr    "), HelpDescStyle.Render("Generate 1-click room invite link & ASCII QR code"),
+		HelpKeyStyle.Render("/identity /whoami"), HelpDescStyle.Render("Show device Ed25519 cryptographic fingerprint"),
+		HelpKeyStyle.Render("/kick / /ban     "), HelpDescStyle.Render("Room moderation controls (/unban, /banlist)"),
+		HelpKeyStyle.Render("/expire /autodel "), HelpDescStyle.Render("Room self-destruct countdown / disappearing messages"),
+
+		sectionFiles,
+		HelpKeyStyle.Render("Ctrl+O / /browse "), HelpDescStyle.Render("Interactive visual file explorer to send files"),
+		HelpKeyStyle.Render("Ctrl+F / /files  "), HelpDescStyle.Render("Open Shared Files Vault modal with custom icons"),
+		HelpKeyStyle.Render("/get <id|#|name> "), HelpDescStyle.Render("1-command download shared room file or URL"),
+		HelpKeyStyle.Render("F2 / F3 (Ctrl+B) "), HelpDescStyle.Render("Toggle members dropdown / sidebar width mode"),
+		HelpKeyStyle.Render("/theme <name>    "), HelpDescStyle.Render("Switch UI theme (catppuccin, dracula, nord, matrix)"),
+		HelpKeyStyle.Render("/clear / /quit   "), HelpDescStyle.Render("Clear chat buffer / Quit TermChat (Ctrl+C)"),
+
 		lipgloss.NewStyle().Foreground(SecondaryColor).Render("Press ESC, F1, or Enter to return to chat..."),
 	)
 

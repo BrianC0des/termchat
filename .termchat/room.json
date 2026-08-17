@@ -1,0 +1,11 @@
+{
+  "repo": "BrianC0des/termchat",
+  "room": "termchat-collab",
+  "relay": "wss://termchat-o51d.onrender.com/ws",
+  "auto_connect": true,
+  "features": {
+    "ci_alerts": true,
+    "git_diff_sharing": true,
+    "pr_cards": true
+  }
+}
