@@ -438,7 +438,7 @@ func (m *Model) renderHelpView() string {
 		HelpKeyStyle.Render("/branch /checkout"), HelpDescStyle.Render("Inspect current git branch or switch branches (/switch)"),
 		HelpKeyStyle.Render("/pr / /issue / /ci"), HelpDescStyle.Render("GitHub PR cards, issue previews & live CI/CD status"),
 		HelpKeyStyle.Render("Ctrl+X / /editor "), HelpDescStyle.Render("Open $EDITOR (nvim/nano/vim) to compose code/notes"),
-		HelpKeyStyle.Render("Shift+Enter      "), HelpDescStyle.Render("Insert newline (multiline input without sending)"),
+		HelpKeyStyle.Render("Shift/Alt+Enter   "), HelpDescStyle.Render("Insert newline / multiline draft (or Ctrl+J / Ctrl+N)"),
 		HelpKeyStyle.Render("Ctrl+E / F4      "), HelpDescStyle.Render("Toggle Discord-style folding on code blocks"),
 
 		sectionRoom,

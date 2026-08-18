@@ -466,6 +466,40 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		keyStr := strings.ToLower(msg.String())
+		if msg.Type == tea.KeyCtrlJ ||
+			msg.Type == tea.KeyCtrlN ||
+			keyStr == "shift+enter" ||
+			keyStr == "alt+enter" ||
+			keyStr == "ctrl+j" ||
+			keyStr == "ctrl+n" ||
+			(msg.Alt && msg.Type == tea.KeyEnter) {
+			// Shift+Enter / Alt+Enter / Ctrl+J / Ctrl+N inserts a newline without submitting!
+			current := m.textInput.Value()
+			for token, snippet := range m.pastedSnippets {
+				if strings.Contains(current, token) {
+					current = strings.ReplaceAll(current, token, snippet)
+				}
+			}
+			newVal := current + "\n"
+			lines := strings.Split(newVal, "\n")
+			lineCount := len(lines)
+			if lineCount > 1 && lines[len(lines)-1] == "" {
+				lineCount--
+			}
+
+			m.pasteCounter++
+			tokenKey := fmt.Sprintf("[Multiline draft #%d +%d lines]", m.pasteCounter, lineCount+1)
+			if m.pastedSnippets == nil {
+				m.pastedSnippets = make(map[string]string)
+			}
+			m.pastedSnippets[tokenKey] = newVal
+			m.textInput.SetValue(tokenKey)
+			m.textInput.SetCursor(len(tokenKey))
+			m.setToast(fmt.Sprintf("[DRAFT] Inserted newline (%d lines). Press Enter to send, or Ctrl+X to edit in $EDITOR.", lineCount+1), 4*time.Second)
+			return m, nil
+		}
+
 		switch msg.Type {
 		case tea.KeyEsc, tea.KeyCtrlK, tea.KeyCtrlL:
 			if m.textInput.Value() != "" {
@@ -510,18 +544,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case tea.KeyCtrlX:
 			return m, openEditorCmd()
-
-		case tea.KeyCtrlJ:
-			// Shift+Enter / Alt+Enter / Ctrl+J inserts a newline without submitting!
-			current := m.textInput.Value()
-			pos := m.textInput.Position()
-			if pos > len(current) {
-				pos = len(current)
-			}
-			newVal := current[:pos] + "\n" + current[pos:]
-			m.textInput.SetValue(newVal)
-			m.textInput.SetCursor(pos + 1)
-			return m, nil
 
 		case tea.KeyUp:
 			if m.textInput.Value() == "" {
