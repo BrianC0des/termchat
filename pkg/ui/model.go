@@ -2333,7 +2333,12 @@ func (m *Model) renderMessages() string {
 				prefix := fmt.Sprintf("%s%s", numBadge, timerBadge)
 				nameTag := getUserNameStyle(msg.SenderName, msg.IsMe).Render(fmt.Sprintf("[%s]:", msg.SenderName))
 				firstLinePrefix := fmt.Sprintf("%s %s", prefix, nameTag)
-				continuationPrefix := fmt.Sprintf("   %s", lipgloss.NewStyle().Foreground(MutedColor).Render("│"))
+				firstWidth := lipgloss.Width(firstLinePrefix)
+				padLen := 0
+				if firstWidth > 5 {
+					padLen = firstWidth - 5
+				}
+				continuationPrefix := fmt.Sprintf("   %s %s", lipgloss.NewStyle().Foreground(MutedColor).Render("│"), strings.Repeat(" ", padLen))
 				formatted := FormatChatMessageWithFold(msg.Content, wrapWidth, firstLinePrefix, continuationPrefix, m.manager.LocalName, m.expandCodeBlocks)
 				sb.WriteString(formatted)
 			}

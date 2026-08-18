@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 var ansiRegexp = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
@@ -49,6 +51,38 @@ func TestFormatChatMessage_CodeFolding(t *testing.T) {
 	expanded := FormatChatMessageWithFold(longCode, 80, "#4 [alice]:", "   ", "bob", true)
 	if strings.Contains(expanded, "folded") || !strings.Contains(expanded, "line12") {
 		t.Fatalf("Expected long code block to be fully expanded when expandCodeBlocks=true, got: %s", expanded)
+	}
+}
+
+func TestFormatChatMessage_MultilineAlignment(t *testing.T) {
+	raw := "First line text\nSecond line text\nThird line text"
+	firstPrefix := "#1 [devchan]:"
+	firstWidth := len(firstPrefix)
+	padLen := 0
+	if firstWidth > 5 {
+		padLen = firstWidth - 5
+	}
+	contPrefix := "   │ " + strings.Repeat(" ", padLen)
+
+	formatted := stripANSI(FormatChatMessage(raw, 80, firstPrefix, contPrefix, "devchan"))
+	lines := strings.Split(strings.TrimSpace(formatted), "\n")
+
+	if len(lines) != 3 {
+		t.Fatalf("Expected 3 lines, got %d: %v", len(lines), lines)
+	}
+
+	// Verify visual display column alignment
+	firstTextIdx := strings.Index(lines[0], "First line text")
+	secondTextIdx := strings.Index(lines[1], "Second line text")
+	thirdTextIdx := strings.Index(lines[2], "Third line text")
+
+	firstCol := lipgloss.Width(lines[0][:firstTextIdx])
+	secondCol := lipgloss.Width(lines[1][:secondTextIdx])
+	thirdCol := lipgloss.Width(lines[2][:thirdTextIdx])
+
+	if firstCol != secondCol || secondCol != thirdCol {
+		t.Fatalf("Multiline misalignment: line1 col=%d, line2 col=%d, line3 col=%d",
+			firstCol, secondCol, thirdCol)
 	}
 }
 
