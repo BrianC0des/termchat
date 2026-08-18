@@ -619,6 +619,90 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	binaryName := getPlatformBinaryName()
 	archiveName := getPlatformArchiveName()
 
+	// Tier -1: Chrome-style Differential Binary Delta Update (<150KB payload)
+	deltaName := fmt.Sprintf("%s-%s-to-%s.delta.zst", binaryName, AppVersion, latestTag)
+	deltaURLs := []string{
+		fmt.Sprintf("https://huggingface.co/datasets/devchan123/termchat-releases/resolve/main/%s", deltaName),
+		fmt.Sprintf("https://huggingface.co/datasets/BrianC0des/termchat-releases/resolve/main/%s", deltaName),
+		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, deltaName),
+		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", deltaName),
+	}
+
+	clients := []*http.Client{
+		createOptimizedHTTPClient(false),
+		createOptimizedHTTPClient(true),
+		http.DefaultClient,
+		&http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
+		},
+	}
+
+	if onProgress != nil {
+		onProgress(fmt.Sprintf("[NET] Checking differential delta patch (%s -> %s)...", AppVersion, latestTag))
+	}
+
+	for _, client := range clients {
+		for _, dURL := range deltaURLs {
+			req, rErr := http.NewRequest("GET", dURL, nil)
+			if rErr != nil {
+				continue
+			}
+			req.Header.Set("User-Agent", "TermChat-Updater/2.0")
+			dResp, dErr := client.Do(req)
+			if dErr == nil && dResp.StatusCode == http.StatusOK {
+				deltaData, readErr := io.ReadAll(dResp.Body)
+				dResp.Body.Close()
+				if readErr == nil && len(deltaData) > 76 && string(deltaData[:4]) == DeltaMagic {
+					if onProgress != nil {
+						onProgress(fmt.Sprintf("[NET] Downloaded delta patch (%.1f KB)! Reconstructing binary...", float64(len(deltaData))/1024))
+					}
+					currentBinaryBytes, fErr := os.ReadFile(execPath)
+					if fErr == nil {
+						reconstructedBytes, pErr := ApplyDelta(currentBinaryBytes, deltaData)
+						if pErr == nil && len(reconstructedBytes) > 100000 {
+							// Successfully reconstructed bit-perfect target binary via delta!
+							tmpFile, tErr := os.CreateTemp(filepath.Dir(execPath), "termchat-delta-update-*")
+							if tErr != nil {
+								tmpFile, tErr = os.CreateTemp("", "termchat-delta-update-*")
+							}
+							if tErr == nil {
+								tmpPath := tmpFile.Name()
+								_, _ = tmpFile.Write(reconstructedBytes)
+								_ = tmpFile.Close()
+								_ = os.Chmod(tmpPath, 0755)
+
+								if runtime.GOOS == "windows" {
+									oldPath := execPath + ".old"
+									_ = os.Remove(oldPath)
+									_ = os.Rename(execPath, oldPath)
+								}
+
+								renameErr := os.Rename(tmpPath, execPath)
+								if renameErr != nil {
+									src, _ := os.Open(tmpPath)
+									dst, _ := os.OpenFile(execPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+									if src != nil && dst != nil {
+										_, _ = io.Copy(dst, src)
+										_ = dst.Close()
+										_ = src.Close()
+									}
+									_ = os.Remove(tmpPath)
+								}
+
+								return fmt.Sprintf("[OK] Instant delta update applied (%.1f KB patch)! TermChat updated to %s.\n:: Please restart termchat to run new version.", float64(len(deltaData))/1024, latestTag), nil
+							}
+						}
+					}
+				}
+			}
+			if dResp != nil {
+				dResp.Body.Close()
+			}
+		}
+	}
+
 	urls := []string{
 		// Tier 0: Hugging Face Cloudflare Enterprise Global Edge CDN (Manila / Singapore Edge nodes, 80+ MB/s)
 		fmt.Sprintf("https://huggingface.co/datasets/devchan123/termchat-releases/resolve/main/%s", archiveName),
@@ -638,17 +722,6 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, archiveName),
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, binaryName),
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s.tar.gz", latestTag, binaryName),
-	}
-
-	clients := []*http.Client{
-		createOptimizedHTTPClient(false),
-		createOptimizedHTTPClient(true),
-		http.DefaultClient,
-		&http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		},
 	}
 	var resp *http.Response
 	var activeClient *http.Client

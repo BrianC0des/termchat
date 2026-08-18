@@ -53,7 +53,50 @@ jobs:
           sha256sum termchat-linux-amd64.tar.zst termchat-windows.zip termchat-android-arm64.tar.zst termchat-mac-apple-silicon.tar.zst > checksums.txt
           cd ..
 
+          echo "[DELTA] Generating Chrome-style Differential Binary Delta Patches..."
+          CURRENT_TAG="${GITHUB_REF_NAME}"
+          PREV_TAG=$(gh release list --limit 2 --json tagName --jq '.[1].tagName' || true)
+
+          if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "null" ]; then
+            echo "Previous release tag detected: $PREV_TAG -> Current: $CURRENT_TAG"
+            mkdir -p prev
+            gh release download "$PREV_TAG" -D prev || true
+
+            # Extract previous binaries if archives
+            if [ -f "prev/termchat-linux-amd64.tar.zst" ]; then
+              tar --zstd -xvf prev/termchat-linux-amd64.tar.zst -C prev/ || true
+            fi
+            if [ -f "prev/termchat-android-arm64.tar.zst" ]; then
+              tar --zstd -xvf prev/termchat-android-arm64.tar.zst -C prev/ || true
+            fi
+            if [ -f "prev/termchat-mac-apple-silicon.tar.zst" ]; then
+              tar --zstd -xvf prev/termchat-mac-apple-silicon.tar.zst -C prev/ || true
+            fi
+            if [ -f "prev/termchat-windows.zip" ]; then
+              unzip -o prev/termchat-windows.zip -d prev/ || true
+            fi
+
+            # Build host delta generator tool
+            go build -o /tmp/termchat-delta .
+
+            # Generate delta patches
+            if [ -f "prev/termchat-linux-amd64" ] && [ -f "dist/termchat-linux-amd64" ]; then
+              /tmp/termchat-delta delta prev/termchat-linux-amd64 dist/termchat-linux-amd64 dist/termchat-linux-amd64-${PREV_TAG}-to-${CURRENT_TAG}.delta.zst || true
+            fi
+            if [ -f "prev/termchat-android-arm64" ] && [ -f "dist/termchat-android-arm64" ]; then
+              /tmp/termchat-delta delta prev/termchat-android-arm64 dist/termchat-android-arm64 dist/termchat-android-arm64-${PREV_TAG}-to-${CURRENT_TAG}.delta.zst || true
+            fi
+            if [ -f "prev/termchat-mac-apple-silicon" ] && [ -f "dist/termchat-mac-apple-silicon" ]; then
+              /tmp/termchat-delta delta prev/termchat-mac-apple-silicon dist/termchat-mac-apple-silicon dist/termchat-mac-apple-silicon-${PREV_TAG}-to-${CURRENT_TAG}.delta.zst || true
+            fi
+            if [ -f "prev/termchat-windows.exe" ] && [ -f "dist/termchat-windows.exe" ]; then
+              /tmp/termchat-delta delta prev/termchat-windows.exe dist/termchat-windows.exe dist/termchat-windows.exe-${PREV_TAG}-to-${CURRENT_TAG}.delta.zst || true
+            fi
+          fi
+
           ls -lh dist/
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create GitHub Release & Upload Assets
         uses: softprops/action-gh-release@v2
@@ -64,6 +107,7 @@ jobs:
             dist/termchat-android-arm64.tar.zst
             dist/termchat-mac-apple-silicon.tar.zst
             dist/checksums.txt
+            dist/*.delta.zst
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

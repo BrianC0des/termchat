@@ -52,6 +52,44 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Handle 'termchat delta <old-binary> <new-binary> [output-patch]'
+	if len(os.Args) >= 4 && os.Args[1] == "delta" {
+		oldPath := os.Args[2]
+		newPath := os.Args[3]
+		outPath := ""
+		if len(os.Args) >= 5 {
+			outPath = os.Args[4]
+		} else {
+			outPath = newPath + ".delta.zst"
+		}
+
+		oldBytes, err := os.ReadFile(oldPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ERR] Reading old binary: %v\n", err)
+			os.Exit(1)
+		}
+		newBytes, err := os.ReadFile(newPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ERR] Reading new binary: %v\n", err)
+			os.Exit(1)
+		}
+
+		patch, err := system.GenerateDelta(oldBytes, newBytes)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ERR] Generating delta patch: %v\n", err)
+			os.Exit(1)
+		}
+
+		if err := os.WriteFile(outPath, patch, 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "[ERR] Writing delta patch: %v\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("[OK] Binary delta patch generated: %s (%.1f KB, %.1f%% of full binary size)\n",
+			outPath, float64(len(patch))/1024, float64(len(patch))/float64(len(newBytes))*100)
+		os.Exit(0)
+	}
+
 	// Handle 'termchat init [room-name]' or -init flag
 	if *initFlag || (len(os.Args) > 1 && os.Args[1] == "init") {
 		cfg := system.LoadConfig()
