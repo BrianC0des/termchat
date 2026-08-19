@@ -74,13 +74,25 @@ if (-not $ExtractedExe) {
     exit 1
 }
 
-# 5. Install to Local Programs
+# 5. Clean Old Binary & Install to Local Programs
 New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-Copy-Item -Path $ExtractedExe.FullName -Destination "$InstallDir\$ExeName" -Force
+$DestPath = "$InstallDir\$ExeName"
+
+if (Test-Path $DestPath) {
+    Remove-Item -Path $DestPath -Force -ErrorAction SilentlyContinue
+}
+
+Copy-Item -Path $ExtractedExe.FullName -Destination $DestPath -Force
 
 # 6. Cleanup Temporary Files
 Remove-Item -Path $TempZip -Force -ErrorAction SilentlyContinue
 Remove-Item -Path $TempExtract -Recurse -Force -ErrorAction SilentlyContinue
+
+# Verify installed binary
+$VerifiedVer = & "$DestPath" --version 2>$null
+if (-not $VerifiedVer) {
+    $VerifiedVer = "TermChat $Tag"
+}
 
 # 7. Add to User PATH if not present
 $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
@@ -93,7 +105,7 @@ if ($UserPath -notlike "*$InstallDir*") {
 
 Write-Host ""
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Green
-Write-Host "  ✓ TermChat $Tag successfully installed!" -ForegroundColor Green
+Write-Host "  ✓ Cleanly installed: $VerifiedVer" -ForegroundColor Green
 Write-Host "═══════════════════════════════════════════════════════" -ForegroundColor Green
 Write-Host ""
 

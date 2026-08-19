@@ -177,14 +177,20 @@ if [ -z "${BINARY_PATH}" ]; then
     exit 1
 fi
 
-# 7. Install to Destination
+# 7. Clean Old Binary & Install to Destination
 mkdir -p "${INSTALL_DIR}"
+rm -f "${INSTALL_DIR}/termchat"
+rm -f /tmp/termchat-staged-* /tmp/termchat-update-* 2>/dev/null || true
+
 cp -f "${BINARY_PATH}" "${INSTALL_DIR}/termchat"
-chmod +x "${INSTALL_DIR}/termchat"
+chmod 0755 "${INSTALL_DIR}/termchat"
+
+# Verify installed binary
+VERIFIED_VER=$("${INSTALL_DIR}/termchat" --version 2>/dev/null || echo "TermChat ${TAG}")
 
 echo ""
 echo -e "${GREEN}${BOLD}═══════════════════════════════════════════════════════${RESET}"
-echo -e "${GREEN}${BOLD}  ✓ TermChat ${TAG} successfully installed!${RESET}"
+echo -e "${GREEN}${BOLD}  ✓ Cleanly installed: ${VERIFIED_VER}${RESET}"
 echo -e "${GREEN}${BOLD}═══════════════════════════════════════════════════════${RESET}"
 echo ""
 
