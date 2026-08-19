@@ -84,46 +84,60 @@ echo -e "${BLUE}Target Package:${RESET}    ${BOLD}${ASSET_NAME}${RESET}"
 echo -e "${BLUE}Install Path:${RESET}      ${BOLD}${INSTALL_DIR}/termchat${RESET}"
 echo ""
 
-# 2. Fetch Latest Release Version
+# 2. Ensure Required Tools
+if [ "${TARGET_OS}" = "android" ] && command -v pkg >/dev/null 2>&1; then
+    if ! command -v zstd >/dev/null 2>&1 || ! command -v tar >/dev/null 2>&1; then
+        echo -e "${YELLOW}Installing required extraction tools (zstd, tar) in Termux...${RESET}"
+        pkg install -y zstd tar || true
+    fi
+fi
+
+# 3. Fetch Latest Release Version
 echo -e "${YELLOW}Fetching latest release info...${RESET}"
 TAG=""
 if command -v curl >/dev/null 2>&1; then
-    TAG=$(curl -sSL -H "Accept: application/vnd.github.v3+json" "${GITHUB_LATEST_API}" | grep '"tag_name":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
+    TAG=$(curl -sSL --max-time 4 "https://raw.githubusercontent.com/${REPO}/main/version.json" | grep '"version":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
 fi
 
-if [ -z "${TAG}" ]; then
-    TAG="v1.9.8"
-    echo -e "${YELLOW}Using release version: ${TAG}${RESET}"
-else
-    echo -e "${GREEN}Found latest version: ${TAG}${RESET}"
+if [ -z "${TAG}" ] && command -v curl >/dev/null 2>&1; then
+    TAG=$(curl -sSLI -o /dev/null -w "%{url_effective}" --max-time 4 "https://github.com/${REPO}/releases/latest" | sed -E 's/.*\/tag\/([^/]+).*/\1/' || true)
 fi
 
-# 3. Mirror URLs
+if [ -z "${TAG}" ] && command -v curl >/dev/null 2>&1; then
+    TAG=$(curl -sSL -H "Accept: application/vnd.github.v3+json" --max-time 4 "${GITHUB_LATEST_API}" | grep '"tag_name":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+fi
+
+if [ -z "${TAG}" ] || [ "${TAG}" = "null" ] || [ "${TAG}" = "https://github.com/${REPO}/releases" ]; then
+    TAG="v2.1.0"
+fi
+echo -e "${GREEN}Using release version: ${TAG}${RESET}"
+
+# 4. Mirror URLs
 URL_GITHUB="https://github.com/${REPO}/releases/download/${TAG}/${ASSET_NAME}"
-URL_FASTLY="https://raw.githubusercontent.com/${REPO}/binaries/${ASSET_NAME}"
 URL_HF="https://huggingface.co/datasets/BrianC0des/termchat-releases/resolve/main/${ASSET_NAME}"
-URL_CHECKSUM="https://github.com/${REPO}/releases/download/${TAG}/checksums.txt"
+URL_FASTLY="https://raw.githubusercontent.com/${REPO}/binaries/${ASSET_NAME}"
 
-# 4. Create Temporary Directory
+# 5. Create Temporary Directory
 TMP_DIR=$(mktemp -d)
 cleanup() {
     rm -rf "${TMP_DIR}"
 }
 trap cleanup EXIT
 
-# 5. Download with Automatic Fallback
+# 6. Download with Automatic Fallback
 echo -e "${YELLOW}Downloading ${ASSET_NAME}...${RESET}"
 DOWNLOAD_SUCCESS=0
 
-for URL in "${URL_GITHUB}" "${URL_FASTLY}" "${URL_HF}"; do
+for URL in "${URL_HF}" "${URL_GITHUB}" "${URL_FASTLY}"; do
     echo -e "  Trying: ${BLUE}${URL}${RESET}"
     if curl -fsSL --connect-timeout 8 --max-time 30 -o "${TMP_DIR}/${ASSET_NAME}" "${URL}"; then
-        DOWNLOAD_SUCCESS=1
-        echo -e "${GREEN}  ✓ Downloaded successfully!${RESET}"
-        break
-    else
-        echo -e "${YELLOW}  ✗ Failed, trying next mirror...${RESET}"
+        if [ -s "${TMP_DIR}/${ASSET_NAME}" ] && [ $(wc -c < "${TMP_DIR}/${ASSET_NAME}") -gt 100000 ]; then
+            DOWNLOAD_SUCCESS=1
+            echo -e "${GREEN}  ✓ Downloaded successfully!${RESET}"
+            break
+        fi
     fi
+    echo -e "${YELLOW}  ✗ Failed or file incomplete, trying next mirror...${RESET}"
 done
 
 if [ "${DOWNLOAD_SUCCESS}" -ne 1 ]; then
@@ -131,7 +145,7 @@ if [ "${DOWNLOAD_SUCCESS}" -ne 1 ]; then
     exit 1
 fi
 
-# 6. Extract Archive
+# 7. Extract Archive
 echo -e "${YELLOW}Extracting binary...${RESET}"
 mkdir -p "${TMP_DIR}/extracted"
 
@@ -142,7 +156,7 @@ elif command -v unzstd >/dev/null 2>&1; then
 else
     # Fallback to direct tar extraction
     tar -xf "${TMP_DIR}/${ASSET_NAME}" -C "${TMP_DIR}/extracted" || {
-        echo -e "${RED}Error: zstd extraction required. Please install 'zstd' package.${RESET}"
+        echo -e "${RED}Error: zstd extraction required. Please run: pkg install zstd tar (or apt install zstd)${RESET}"
         exit 1
     }
 fi
