@@ -112,10 +112,18 @@ if [ -z "${TAG}" ] || [ "${TAG}" = "null" ] || [ "${TAG}" = "https://github.com/
 fi
 echo -e "${GREEN}Using release version: ${TAG}${RESET}"
 
+# Auto-install zstd in Termux if missing
+if [ "${TARGET_OS}" = "android" ]; then
+    if ! command -v zstd >/dev/null 2>&1 && ! command -v unzstd >/dev/null 2>&1; then
+        echo -e "${YELLOW}Installing required zstd extractor in Termux...${RESET}"
+        pkg install -y zstd tar curl >/dev/null 2>&1 || true
+    fi
+fi
+
 # 4. Mirror URLs
 URL_GITHUB="https://github.com/${REPO}/releases/download/${TAG}/${ASSET_NAME}"
-URL_HF="https://huggingface.co/datasets/BrianC0des/termchat-releases/resolve/main/${ASSET_NAME}"
 URL_FASTLY="https://raw.githubusercontent.com/${REPO}/binaries/${ASSET_NAME}"
+URL_HF="https://huggingface.co/datasets/BrianC0des/termchat-releases/resolve/main/${ASSET_NAME}"
 
 # 5. Create Temporary Directory
 TMP_DIR=$(mktemp -d)
@@ -128,7 +136,7 @@ trap cleanup EXIT
 echo -e "${YELLOW}Downloading ${ASSET_NAME}...${RESET}"
 DOWNLOAD_SUCCESS=0
 
-for URL in "${URL_HF}" "${URL_GITHUB}" "${URL_FASTLY}"; do
+for URL in "${URL_GITHUB}" "${URL_FASTLY}" "${URL_HF}"; do
     echo -e "  Trying: ${BLUE}${URL}${RESET}"
     if curl -fsSL --connect-timeout 8 --max-time 30 -o "${TMP_DIR}/${ASSET_NAME}" "${URL}"; then
         if [ -s "${TMP_DIR}/${ASSET_NAME}" ] && [ $(wc -c < "${TMP_DIR}/${ASSET_NAME}") -gt 100000 ]; then
