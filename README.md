@@ -6,7 +6,7 @@
 [![Build Status](https://img.shields.io/github/actions/workflow/status/BrianC0des/termchat/release.yml?style=flat-square)](https://github.com/BrianC0des/termchat/actions)
 [![License](https://img.shields.io/github/license/BrianC0des/termchat?style=flat-square)](LICENSE)
 
-TermChat brings modern developer collaboration directly into your terminal. Zero-commit live git diff sharing, 1-command patch application, GitHub PR/Issue cards, Discord-style collapsible code folding, external editor compose (`nvim`/`nano`), and end-to-end encrypted team rooms.
+TermChat brings modern developer collaboration directly into your terminal. Zero-commit live git diff sharing, 1-command patch application, GitHub PR/Issue cards, Discord-style collapsible code folding, external editor compose (`nvim`/`nano`), Chrome-style differential binary delta updates, and end-to-end encrypted team rooms.
 
 ---
 
@@ -35,7 +35,7 @@ Turn any Git repository into an instant developer collaboration space:
 cd my-project
 termchat init my-team-room
 ```
-This generates `.termchat/room.json` linked to your Git remote repository.
+This generates `.termchat/room.json` linked to your Git remote repository with your Ed25519 identity as creator.
 
 ### 2. Teammates clone and auto-join
 ```bash
@@ -54,24 +54,29 @@ TermChat automatically detects `.termchat/room.json` and connects your team into
 - `/branch` & `/checkout <branch>`: Inspect branches and switch workspaces without leaving chat.
 
 ### 🐙 Native GitHub PR, Issue & CI/CD Integration
-- `/pr <number>`: Live pull request inspection (review approvals, additions/deletions, branches).
+- `/pr <number>`: Live pull request inspection (review approvals, additions/deletions, branches) with `Ctrl+E` folding.
 - `/checkout #<number>`: Check out any PR branch locally with 1 command.
-- `/issue <number>`: Interactive issue preview cards.
+- `/issue <number>`: Interactive issue preview cards with label badges and description.
 - `/ci`: Real-time GitHub Actions workflow status report.
+
+### ⚡ Chrome-Style Differential Delta Updates
+- Micro-patch updates (`.delta.zst` ~100KB vs 5.5MB full binary).
+- In-memory reconstruction in <15ms with SHA-256 integrity verification and atomic zero-downtime swap.
 
 ### 📝 External Editor Compose (`nvim` / `nano` / `vim`)
 - Press `Ctrl+X` or type `/editor` to open your favorite editor to compose long code blocks, markdown notes, or architectural thoughts. Auto-populates into chat upon save.
 
 ### ⌨️ Modern Terminal UX
-- **Multiline Input**: Press `Shift+Enter` or `Alt+Enter` to insert newlines without sending.
+- **Universal Multiline Input**: Press `Shift+Enter`, `Alt+Enter`, `Ctrl+J`, or `Ctrl+N` to insert newlines without sending.
+- **Dynamic Text Alignment**: Continuation lines align with the sender nickname column.
 - **Collapsible Code Blocks**: Press `Ctrl+E` or `F4` to fold/unfold long stacktraces and code snippets.
-- **Clean Toast Status Bar**: Transient status notifications (`⚡`) display in the header bar instead of cluttering chat history.
-- **Interactive File Vault**: Press `Ctrl+F` to browse shared room files or `Ctrl+O` to open the visual file picker with custom folder (`📁`) and language icons (`🐹`, `🐍`, `🦀`, `📜`, `⚙️`, `🌐`).
+- **Clean Toast Status Bar**: Transient status notifications (`::`) display in the header bar instead of cluttering chat history.
+- **Interactive File Vault**: Press `Ctrl+F` to browse shared room files or `Ctrl+O` to open the visual file picker with clean developer CLI tags (`[DIR]`, `[go]`, `[py]`, `[rs]`, `[ts]`, `[img]`).
 
 ### 🛡️ End-to-End Encryption & Device Identity
 - **AES-256-GCM E2E**: Encrypts messages and file transfers with key verification codes.
 - **Ed25519 Cryptographic Identity**: Persistent device keys (`/identity`) preventing impersonation.
-- **Room Moderation**: `/invite` (1-click magic link & QR), `/kick`, `/ban`, `/unban`, and `/banlist`.
+- **Room Moderation & Self-Destruct**: `/create [room] [pw]`, `/join <room> [pw]`, `/invite` (1-click magic link & QR), `/destroy <code>` (instant RAM wipe), `/kick`, `/ban`, `/unban`.
 
 ---
 
@@ -85,16 +90,19 @@ TermChat automatically detects `.termchat/room.json` and connects your team into
 | `/pr <#>` / `/checkout #<#>` | | Fetch GitHub PR card or checkout PR branch |
 | `/issue <#>` / `/ci` | | Preview GitHub Issue or check GitHub Actions CI status |
 | `/editor` / `/compose` | `Ctrl + X` | Open `$EDITOR` (`nvim`/`nano`/`vim`) to compose text |
+| `/create [name] [pw]` | | Create & host new cloud room with optional AES-256 password |
+| `/join <name> [pw]` | | Join existing room or switch channels |
 | `/init [room]` | | Scaffold `.termchat/room.json` for team auto-join |
-| `/room <name> [pass]` | | Join or create a 24/7 cloud room |
 | `/invite` / `/qr` | | Generate 1-click room invite link and ASCII QR code |
+| `/destroy <code>` | | Room creator instant self-destruct: zero RAM & wipe |
+| `/expire /autodel` | | Room self-destruct countdown & disappearing messages |
 | `/identity` / `/whoami` | | Show device Ed25519 fingerprint & public key |
 | `/kick <user>` / `/ban <user>` | | Room moderation and banlist management |
 | `/files` | `Ctrl + F` | Open Shared Files Vault modal |
 | `/get <id\|#\|name>` | | 1-command download shared room file |
-| `/browse` / `/send <file>` | `Ctrl + O` | Visual file explorer / send file with optional TTL |
+| `/browse` / `/send <file>` | `Ctrl + O` | Visual file explorer / send file with clean tags |
 | `/theme <name>` | | Switch themes (`catppuccin`, `dracula`, `nord`, `matrix`, `tokyonight`) |
-| `/update` | | 1-Click self-update binary to latest release |
+| `/update` | | 1-Click differential binary self-update to latest release |
 | `/help` | `F1` | Interactive help modal |
 
 ---
