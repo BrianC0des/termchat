@@ -122,8 +122,9 @@ fi
 
 # 4. Mirror URLs
 URL_GITHUB="https://github.com/${REPO}/releases/download/${TAG}/${ASSET_NAME}"
-URL_FASTLY="https://raw.githubusercontent.com/${REPO}/binaries/${ASSET_NAME}"
-URL_HF="https://huggingface.co/datasets/BrianC0des/termchat-releases/resolve/main/${ASSET_NAME}"
+URL_JSDELIVR="https://cdn.jsdelivr.net/gh/${REPO}@binaries/${ASSET_NAME}"
+URL_FASTLY="https://fastly.jsdelivr.net/gh/${REPO}@binaries/${ASSET_NAME}"
+URL_RAW="https://raw.githubusercontent.com/${REPO}/binaries/${ASSET_NAME}"
 
 # 5. Create Temporary Directory
 TMP_DIR=$(mktemp -d)
@@ -136,9 +137,9 @@ trap cleanup EXIT
 echo -e "${YELLOW}Downloading ${ASSET_NAME}...${RESET}"
 DOWNLOAD_SUCCESS=0
 
-for URL in "${URL_GITHUB}" "${URL_FASTLY}" "${URL_HF}"; do
+for URL in "${URL_GITHUB}" "${URL_JSDELIVR}" "${URL_FASTLY}" "${URL_RAW}"; do
     echo -e "  Trying: ${BLUE}${URL}${RESET}"
-    if curl -fsSL --connect-timeout 8 --max-time 30 -o "${TMP_DIR}/${ASSET_NAME}" "${URL}"; then
+    if curl -fL --progress-bar --connect-timeout 15 --max-time 300 --retry 3 --retry-delay 2 -C - -o "${TMP_DIR}/${ASSET_NAME}" "${URL}"; then
         if [ -s "${TMP_DIR}/${ASSET_NAME}" ] && [ $(wc -c < "${TMP_DIR}/${ASSET_NAME}") -gt 100000 ]; then
             DOWNLOAD_SUCCESS=1
             echo -e "${GREEN}  ✓ Downloaded successfully!${RESET}"
