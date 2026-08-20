@@ -33,7 +33,7 @@ jobs:
 
           echo "[1/4] Compiling Linux PC (amd64)..."
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dist/termchat-linux-amd64 .
-          upx --best --lzma dist/termchat-linux-amd64 || true
+          upx -1 dist/termchat-linux-amd64 || true
           tar --zstd -cvf dist/termchat-linux-amd64.tar.zst -C dist termchat-linux-amd64
 
           echo "[2/4] Compiling Windows 64-bit (amd64)..."
