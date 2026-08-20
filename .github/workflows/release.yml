@@ -34,19 +34,19 @@ jobs:
           echo "[1/4] Compiling Linux PC (amd64)..."
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dist/termchat-linux-amd64 .
           upx -1 dist/termchat-linux-amd64 || true
-          tar --zstd -cvf dist/termchat-linux-amd64.tar.zst -C dist termchat-linux-amd64
+          (cd dist && tar --zstd -cf termchat-linux-amd64.tar.zst termchat-linux-amd64)
 
           echo "[2/4] Compiling Windows 64-bit (amd64)..."
           CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o dist/termchat-windows.exe .
-          zip -j dist/termchat-windows.zip dist/termchat-windows.exe
+          (cd dist && zip -j termchat-windows.zip termchat-windows.exe)
 
           echo "[3/4] Compiling Android Termux (arm64)..."
           CGO_ENABLED=0 GOOS=android GOARCH=arm64 go build -ldflags="-s -w" -o dist/termchat-android-arm64 .
-          tar --zstd -cvf dist/termchat-android-arm64.tar.zst -C dist termchat-android-arm64
+          (cd dist && tar --zstd -cf termchat-android-arm64.tar.zst termchat-android-arm64)
 
           echo "[4/4] Compiling macOS Apple Silicon (arm64)..."
           CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o dist/termchat-mac-apple-silicon .
-          tar --zstd -cvf dist/termchat-mac-apple-silicon.tar.zst -C dist termchat-mac-apple-silicon
+          (cd dist && tar --zstd -cf termchat-mac-apple-silicon.tar.zst termchat-mac-apple-silicon)
 
           echo "[CHECKSUMS] Generating SHA256 checksums..."
           cd dist
