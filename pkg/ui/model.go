@@ -1087,12 +1087,17 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		}
 
 		if targetText != "" {
-			_ = system.WriteClipboard(targetText)
 			preview := targetText
 			if len(preview) > 50 {
 				preview = preview[:47] + "..."
 			}
-			m.addSystemMsg(fmt.Sprintf("[CLIP] Copied %s to clipboard:\n   \"%s\"", copiedLabel, preview))
+			if err := system.WriteClipboard(targetText); err != nil {
+				// Clipboard not available (e.g. Termux without Termux:API)
+				// Show the text in chat so user can manually copy it
+				m.addSystemMsg(fmt.Sprintf("[CLIP] Clipboard unavailable: %v\n   Text: \"%s\"\n   Tip: On Termux, install Termux:API app + run 'pkg install termux-api'", err, preview))
+			} else {
+				m.addSystemMsg(fmt.Sprintf("[CLIP] Copied %s to clipboard:\n   \"%s\"", copiedLabel, preview))
+			}
 		} else {
 			m.addSystemMsg("[CLIP] No messages found to copy.")
 		}
