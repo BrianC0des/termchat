@@ -55,12 +55,15 @@ jobs:
 
           echo "[DELTA] Generating Chrome-style Differential Binary Delta Patches..."
           CURRENT_TAG="${GITHUB_REF_NAME}"
-          PREV_TAG=$(gh release list --limit 2 --json tagName --jq '.[1].tagName' || true)
+          PREV_TAG=$(curl -sSL -H "Accept: application/vnd.github.v3+json" https://api.github.com/repos/BrianC0des/termchat/releases/latest | grep '"tag_name":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
 
-          if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "null" ]; then
+          if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "null" ] && [ "$PREV_TAG" != "$CURRENT_TAG" ]; then
             echo "Previous release tag detected: $PREV_TAG -> Current: $CURRENT_TAG"
             mkdir -p prev
-            gh release download "$PREV_TAG" -D prev || true
+            curl -fsSL -o prev/termchat-linux-amd64.tar.zst "https://github.com/BrianC0des/termchat/releases/download/${PREV_TAG}/termchat-linux-amd64.tar.zst" || true
+            curl -fsSL -o prev/termchat-android-arm64.tar.zst "https://github.com/BrianC0des/termchat/releases/download/${PREV_TAG}/termchat-android-arm64.tar.zst" || true
+            curl -fsSL -o prev/termchat-mac-apple-silicon.tar.zst "https://github.com/BrianC0des/termchat/releases/download/${PREV_TAG}/termchat-mac-apple-silicon.tar.zst" || true
+            curl -fsSL -o prev/termchat-windows.zip "https://github.com/BrianC0des/termchat/releases/download/${PREV_TAG}/termchat-windows.zip" || true
 
             # Extract previous binaries if archives
             if [ -f "prev/termchat-linux-amd64.tar.zst" ]; then
