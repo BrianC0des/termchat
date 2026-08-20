@@ -157,3 +157,16 @@ func ApplyPatch(dir string, patchContent string) (string, error) {
 
 	return "Patch applied cleanly to your local workspace.", nil
 }
+
+// GetCurrentBranch returns the active git branch or empty string if not in a git repo
+func GetCurrentBranch(dir string) string {
+	args := []string{"branch", "--show-current"}
+	if dir != "" {
+		args = []string{"-C", dir, "branch", "--show-current"}
+	}
+	out, err := exec.Command("git", args...).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}

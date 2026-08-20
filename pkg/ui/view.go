@@ -90,11 +90,18 @@ func (m *Model) View() string {
 		autoDeleteBadge = " " + lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render(fmt.Sprintf("[AUTODELETE: %s]", m.autoDeleteTTL))
 	}
 
+	// Git active branch badge
+	var gitBadge string
+	if m.gitBranch != "" {
+		gitBadge = " " + lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render(fmt.Sprintf("[git:%s]", m.gitBranch))
+	}
+
 	headerLeft := lipgloss.JoinHorizontal(
 		lipgloss.Center,
 		TitleStyle.Render(":: TERMCHAT ::"),
 		" ",
 		modeBadge,
+		gitBadge,
 		ttlBadge,
 		autoDeleteBadge,
 		" ",

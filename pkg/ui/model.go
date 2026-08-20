@@ -111,6 +111,8 @@ type Model struct {
 
 	destroyCode string
 	destroyRoom string
+
+	gitBranch string
 }
 
 type SidebarMode int
@@ -271,6 +273,7 @@ func NewModel(mgr *network.Manager) *Model {
 		userStatuses:        make(map[string]string),
 		pinnedMsgs:          make([]ChatMessage, 0),
 		pastedSnippets:      make(map[string]string),
+		gitBranch:           gitcollab.GetCurrentBranch(""),
 	}
 
 	// Pro Feature: Silent Background Pre-fetching of updates while user chats!
@@ -1867,9 +1870,9 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		m.addSystemMsg(fmt.Sprintf("[GIT] Applied patch #patch-%s cleanly to your local workspace! (%s)", patchID, msg))
 
 	case "/branch", "/branches":
-		if out, err := exec.Command("git", "branch", "--show-current").Output(); err == nil && len(out) > 0 {
-			curr := strings.TrimSpace(string(out))
-			m.addSystemMsg(fmt.Sprintf("[GIT] Active Branch: %s", curr))
+		m.gitBranch = gitcollab.GetCurrentBranch("")
+		if m.gitBranch != "" {
+			m.addSystemMsg(fmt.Sprintf("[GIT] Active Branch: %s", m.gitBranch))
 		} else {
 			m.addSystemMsg("[GIT] Not inside a git repository.")
 		}
@@ -1887,6 +1890,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 				if chkErr != nil {
 					m.addSystemMsg(fmt.Sprintf("[GH] %v", chkErr))
 				} else {
+					m.gitBranch = gitcollab.GetCurrentBranch("")
 					m.addSystemMsg(fmt.Sprintf("[GIT] Switched to PR #%d branch! (%s)", prNum, msg))
 				}
 				return
@@ -1899,6 +1903,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			m.addSystemMsg(fmt.Sprintf("[GIT] Failed to switch branch: %s", strings.TrimSpace(string(out))))
 			return
 		}
+		m.gitBranch = gitcollab.GetCurrentBranch("")
 		m.addSystemMsg(fmt.Sprintf("[GIT] Switched to branch '%s'!", targetBranch))
 
 	case "/pr":
