@@ -59,7 +59,12 @@ func GenerateDelta(oldBytes, newBytes []byte) ([]byte, error) {
 		if newPos <= newLen-deltaBlockSize && oldLen >= deltaBlockSize {
 			h := binary.LittleEndian.Uint32(newBytes[newPos : newPos+4])
 			if candidates, found := index[h]; found {
+				cCount := 0
 				for _, oldPos := range candidates {
+					cCount++
+					if cCount > 16 {
+						break
+					}
 					// Count exact matching bytes
 					matchLen := 0
 					for oldPos+matchLen < oldLen && newPos+matchLen < newLen && oldBytes[oldPos+matchLen] == newBytes[newPos+matchLen] {
@@ -68,6 +73,9 @@ func GenerateDelta(oldBytes, newBytes []byte) ([]byte, error) {
 					if matchLen > bestMatchLen {
 						bestMatchLen = matchLen
 						bestOldPos = oldPos
+						if matchLen >= 2048 {
+							break
+						}
 					}
 				}
 			}
