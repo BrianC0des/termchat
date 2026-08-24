@@ -32,110 +32,71 @@ type DeltaPatch struct {
 }
 
 // GenerateDelta computes a binary delta patch from oldBytes to newBytes.
-// It uses block-hash matching, substring expansion, byte-level diffing, and Zstandard compression.
+// It uses fast sliding block-hash matching and Zstandard compression in O(N) linear time.
 func GenerateDelta(oldBytes, newBytes []byte) ([]byte, error) {
 	sourceHash := sha256.Sum256(oldBytes)
 	targetHash := sha256.Sum256(newBytes)
 
-	// 1. Build 16-byte sliding window hash index on oldBytes
 	oldLen := len(oldBytes)
 	newLen := len(newBytes)
 
-	index := make(map[uint32][]int)
-	if oldLen >= deltaBlockSize {
-		for i := 0; i <= oldLen-deltaBlockSize; i += 4 {
+	// 1. Build fast 4-byte hash index on oldBytes (stride 4)
+	index := make(map[uint32]int)
+	if oldLen >= 4 {
+		for i := 0; i <= oldLen-4; i += 4 {
 			h := binary.LittleEndian.Uint32(oldBytes[i : i+4])
-			index[h] = append(index[h], i)
+			index[h] = i
 		}
 	}
 
 	var rawStream bytes.Buffer
 	newPos := 0
+	insertStart := 0
 
 	for newPos < newLen {
-		bestOldPos := -1
-		bestMatchLen := 0
-
-		if newPos <= newLen-deltaBlockSize && oldLen >= deltaBlockSize {
+		if newPos <= newLen-4 && oldLen >= 4 {
 			h := binary.LittleEndian.Uint32(newBytes[newPos : newPos+4])
-			if candidates, found := index[h]; found {
-				cCount := 0
-				for _, oldPos := range candidates {
-					cCount++
-					if cCount > 16 {
-						break
+			if oldPos, found := index[h]; found {
+				// Count matching length starting at oldPos and newPos
+				matchLen := 0
+				for oldPos+matchLen < oldLen && newPos+matchLen < newLen && oldBytes[oldPos+matchLen] == newBytes[newPos+matchLen] {
+					matchLen++
+				}
+
+				if matchLen >= 16 {
+					// Emit accumulated insert literals if any
+					if newPos > insertStart {
+						insertLen := newPos - insertStart
+						rawStream.WriteByte(opInsert)
+						_ = binary.Write(&rawStream, binary.LittleEndian, uint32(insertLen))
+						rawStream.Write(newBytes[insertStart:newPos])
 					}
-					// Count exact matching bytes
-					matchLen := 0
-					for oldPos+matchLen < oldLen && newPos+matchLen < newLen && oldBytes[oldPos+matchLen] == newBytes[newPos+matchLen] {
-						matchLen++
-					}
-					if matchLen > bestMatchLen {
-						bestMatchLen = matchLen
-						bestOldPos = oldPos
-						if matchLen >= 2048 {
-							break
-						}
-					}
+
+					// Emit copy instruction
+					rawStream.WriteByte(opCopy)
+					_ = binary.Write(&rawStream, binary.LittleEndian, uint32(oldPos))
+					_ = binary.Write(&rawStream, binary.LittleEndian, uint32(matchLen))
+
+					newPos += matchLen
+					insertStart = newPos
+					continue
 				}
 			}
 		}
-
-		// If we found a significant matching block (>= 16 bytes)
-		if bestMatchLen >= deltaBlockSize {
-			// Check if we can extend with small byte-level differences (Courgette style diffing)
-			diffLen := bestMatchLen
-			for bestOldPos+diffLen < oldLen && newPos+diffLen < newLen && diffLen < 65535 {
-				diffLen++
-			}
-
-			// If exact match is long, write OpCopy
-			if bestMatchLen >= 24 {
-				rawStream.WriteByte(opCopy)
-				_ = binary.Write(&rawStream, binary.LittleEndian, uint32(bestOldPos))
-				_ = binary.Write(&rawStream, binary.LittleEndian, uint32(bestMatchLen))
-				newPos += bestMatchLen
-				continue
-			}
-		}
-
-		// If no good match, accumulate literal bytes for OpInsert
-		insertStart := newPos
-		for newPos < newLen {
-			if newPos <= newLen-deltaBlockSize {
-				h := binary.LittleEndian.Uint32(newBytes[newPos : newPos+4])
-				if candidates, found := index[h]; found && len(candidates) > 0 {
-					// Check if there is a match of >= 24 bytes
-					hasGoodMatch := false
-					for _, op := range candidates {
-						mLen := 0
-						for op+mLen < oldLen && newPos+mLen < newLen && oldBytes[op+mLen] == newBytes[newPos+mLen] {
-							mLen++
-						}
-						if mLen >= 24 {
-							hasGoodMatch = true
-							break
-						}
-					}
-					if hasGoodMatch {
-						break
-					}
-				}
-			}
-			newPos++
-		}
-
-		insertLen := newPos - insertStart
-		if insertLen > 0 {
-			rawStream.WriteByte(opInsert)
-			_ = binary.Write(&rawStream, binary.LittleEndian, uint32(insertLen))
-			rawStream.Write(newBytes[insertStart:newPos])
-		}
+		newPos++
 	}
 
-	// 2. Compress the instruction stream using Zstd with best compression
+	// Emit trailing insert literals if any
+	if newPos > insertStart {
+		insertLen := newPos - insertStart
+		rawStream.WriteByte(opInsert)
+		_ = binary.Write(&rawStream, binary.LittleEndian, uint32(insertLen))
+		rawStream.Write(newBytes[insertStart:newPos])
+	}
+
+	// 2. Compress the instruction stream using Zstd
 	var compressedData bytes.Buffer
-	enc, err := zstd.NewWriter(&compressedData, zstd.WithEncoderLevel(zstd.SpeedBestCompression))
+	enc, err := zstd.NewWriter(&compressedData, zstd.WithEncoderLevel(zstd.SpeedDefault))
 	if err != nil {
 		return nil, fmt.Errorf("zstd encoder init failed: %w", err)
 	}
@@ -147,20 +108,15 @@ func GenerateDelta(oldBytes, newBytes []byte) ([]byte, error) {
 		return nil, fmt.Errorf("zstd close failed: %w", err)
 	}
 
-	// 3. Assemble binary envelope:
-	// [0..3]   Magic "TCD1"
-	// [4..35]  Source SHA-256
-	// [36..67] Target SHA-256
-	// [68..75] Target Size (uint64)
-	// [76..]   Compressed payload
-	var envelope bytes.Buffer
-	envelope.WriteString(DeltaMagic)
-	envelope.Write(sourceHash[:])
-	envelope.Write(targetHash[:])
-	_ = binary.Write(&envelope, binary.LittleEndian, uint64(newLen))
-	envelope.Write(compressedData.Bytes())
+	// 3. Serialize patch header
+	var patch bytes.Buffer
+	patch.WriteString(DeltaMagic)
+	patch.Write(sourceHash[:])
+	patch.Write(targetHash[:])
+	_ = binary.Write(&patch, binary.LittleEndian, uint64(newLen))
+	patch.Write(compressedData.Bytes())
 
-	return envelope.Bytes(), nil
+	return patch.Bytes(), nil
 }
 
 // ApplyDelta applies a delta patch envelope to oldBytes and reconstructs newBytes with SHA-256 validation.
