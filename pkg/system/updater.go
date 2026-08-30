@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,7 +36,53 @@ func GetPreFetchStatus() (bool, string, int) {
 	return isPreFetching, preFetchTag, preFetchProgress
 }
 
+// compareVersions returns 1 if v1 > v2, -1 if v1 < v2, 0 if v1 == v2
+func compareVersions(v1, v2 string) int {
+	clean := func(v string) []int {
+		v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+		parts := strings.Split(v, ".")
+		var res []int
+		for _, p := range parts {
+			numStr := ""
+			for _, ch := range p {
+				if ch >= '0' && ch <= '9' {
+					numStr += string(ch)
+				} else {
+					break
+				}
+			}
+			if numStr != "" {
+				val, _ := strconv.Atoi(numStr)
+				res = append(res, val)
+			} else {
+				res = append(res, 0)
+			}
+		}
+		for len(res) < 3 {
+			res = append(res, 0)
+		}
+		return res
+	}
+
+	p1 := clean(v1)
+	p2 := clean(v2)
+	for i := 0; i < 3; i++ {
+		if p1[i] > p2[i] {
+			return 1
+		}
+		if p1[i] < p2[i] {
+			return -1
+		}
+	}
+	return 0
+}
+
+func isNewerVersion(latest, current string) bool {
+	return compareVersions(latest, current) > 0
+}
+
 type progressWriter struct {
+	mu         sync.Mutex
 	total      int64
 	current    int64
 	onProgress func(string)
@@ -44,8 +91,10 @@ type progressWriter struct {
 
 func (pw *progressWriter) Write(p []byte) (int, error) {
 	n := len(p)
+	pw.mu.Lock()
+	defer pw.mu.Unlock()
 	pw.current += int64(n)
-	if time.Since(pw.lastReport) > 200*time.Millisecond || pw.current == pw.total {
+	if time.Since(pw.lastReport) > 200*time.Millisecond || (pw.total > 0 && pw.current >= pw.total) {
 		pw.lastReport = time.Now()
 		if pw.onProgress != nil {
 			if pw.total > 500000 {
@@ -436,7 +485,7 @@ func processAndWriteBinary(rawBytes []byte, destFile *os.File) error {
 func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 	go func() {
 		latestTag, err := FetchLatestVersionTag()
-		if err != nil || latestTag == "" || latestTag <= AppVersion {
+		if err != nil || latestTag == "" || !isNewerVersion(latestTag, AppVersion) {
 			return
 		}
 
@@ -547,13 +596,68 @@ func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 	}()
 }
 
+func replaceExecutableSafely(newBinaryPath, execPath string) error {
+	_ = os.Chmod(newBinaryPath, 0755)
+
+	// Step 1: Try atomic rename (works on same filesystem)
+	if err := os.Rename(newBinaryPath, execPath); err == nil {
+		return nil
+	}
+
+	// Step 2: Unlink/move running executable first to prevent ETXTBSY on Linux/Android/Termux
+	oldPath := execPath + ".old"
+	_ = os.Remove(oldPath)
+	if renErr := os.Rename(execPath, oldPath); renErr == nil {
+		// Attempt rename of new binary to destination
+		if renNewErr := os.Rename(newBinaryPath, execPath); renNewErr == nil {
+			_ = os.Remove(oldPath)
+			return nil
+		}
+		// Fallback: Copy if across filesystems
+		src, oErr := os.Open(newBinaryPath)
+		if oErr == nil {
+			dst, cErr := os.OpenFile(execPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+			if cErr == nil {
+				_, copyErr := io.Copy(dst, src)
+				_ = dst.Close()
+				_ = src.Close()
+				if copyErr == nil {
+					_ = os.Remove(oldPath)
+					return nil
+				}
+			} else {
+				_ = src.Close()
+			}
+		}
+		// Rollback if copying new binary failed
+		_ = os.Rename(oldPath, execPath)
+	}
+
+	// Step 3: Direct copy fallback after removing destination
+	_ = os.Remove(execPath)
+	src, oErr := os.Open(newBinaryPath)
+	if oErr != nil {
+		return oErr
+	}
+	defer src.Close()
+
+	dst, cErr := os.OpenFile(execPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+	if cErr != nil {
+		return fmt.Errorf("failed to write executable to %s (ETXTBSY or permission error): %w", execPath, cErr)
+	}
+	defer dst.Close()
+
+	_, err := io.Copy(dst, src)
+	return err
+}
+
 func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	if onProgress != nil {
 		onProgress("[NET] Checking for updates from GitHub...")
 	}
 
 	latestTag, err := FetchLatestVersionTag()
-	if err != nil || latestTag == "" || strings.EqualFold(latestTag, AppVersion) || latestTag <= AppVersion {
+	if err != nil || latestTag == "" || !isNewerVersion(latestTag, AppVersion) {
 		return fmt.Sprintf("[OK] You are already on the latest version of TermChat (%s)!", AppVersion), nil
 	}
 
@@ -595,23 +699,12 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 			if onProgress != nil {
 				onProgress("[OK] Applying pre-downloaded update instantly (0s wait)...")
 			}
-			if runtime.GOOS == "windows" {
-				oldPath := execPath + ".old"
-				_ = os.Remove(oldPath)
-				_ = os.Rename(execPath, oldPath)
-			}
-			rErr := os.Rename(stagedBin, execPath)
-			if rErr != nil {
-				src, _ := os.Open(stagedBin)
-				dst, _ := os.OpenFile(execPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
-				if src != nil && dst != nil {
-					_, _ = io.Copy(dst, src)
-					_ = dst.Close()
-					_ = src.Close()
-				}
-			}
+			rErr := replaceExecutableSafely(stagedBin, execPath)
 			_ = os.Remove(getStagedTagPath())
 			_ = os.Remove(stagedBin)
+			if rErr != nil {
+				return "", fmt.Errorf("failed to apply pre-downloaded update: %w", rErr)
+			}
 			return fmt.Sprintf("[OK] Instant update applied! TermChat updated to %s.\n:: Please restart termchat to run new version.", latestTag), nil
 		}
 	}
@@ -671,24 +764,10 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 								tmpPath := tmpFile.Name()
 								_, _ = tmpFile.Write(reconstructedBytes)
 								_ = tmpFile.Close()
-								_ = os.Chmod(tmpPath, 0755)
-
-								if runtime.GOOS == "windows" {
-									oldPath := execPath + ".old"
-									_ = os.Remove(oldPath)
-									_ = os.Rename(execPath, oldPath)
-								}
-
-								renameErr := os.Rename(tmpPath, execPath)
+								renameErr := replaceExecutableSafely(tmpPath, execPath)
+								_ = os.Remove(tmpPath)
 								if renameErr != nil {
-									src, _ := os.Open(tmpPath)
-									dst, _ := os.OpenFile(execPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
-									if src != nil && dst != nil {
-										_, _ = io.Copy(dst, src)
-										_ = dst.Close()
-										_ = src.Close()
-									}
-									_ = os.Remove(tmpPath)
+									return "", fmt.Errorf("failed to apply delta update: %w", renameErr)
 								}
 
 								return fmt.Sprintf("[OK] Instant delta update applied (%.1f KB patch)! TermChat updated to %s.\n:: Please restart termchat to run new version.", float64(len(deltaData))/1024, latestTag), nil
@@ -820,29 +899,7 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 		return "", fmt.Errorf("error extracting downloaded binary: %w", err)
 	}
 
-	_ = os.Chmod(tmpPath, 0755)
-
-	// On Windows, rename old file first then replace
-	if runtime.GOOS == "windows" {
-		oldPath := execPath + ".old"
-		_ = os.Remove(oldPath)
-		_ = os.Rename(execPath, oldPath)
-	}
-
-	err = os.Rename(tmpPath, execPath)
-	if err != nil {
-		// Fallback: Copy content directly if rename fails across filesystems
-		src, rErr := os.Open(tmpPath)
-		if rErr == nil {
-			dst, wErr := os.OpenFile(execPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
-			if wErr == nil {
-				_, err = io.Copy(dst, src)
-				_ = dst.Close()
-			}
-			_ = src.Close()
-		}
-	}
-
+	err = replaceExecutableSafely(tmpPath, execPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to replace binary at %s: %w", execPath, err)
 	}
