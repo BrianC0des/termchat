@@ -90,6 +90,29 @@ if [ "${TARGET_OS}" = "android" ] && command -v pkg >/dev/null 2>&1; then
         echo -e "${YELLOW}Installing required extraction tools (zstd, tar) in Termux...${RESET}"
         pkg install -y zstd tar || true
     fi
+elif [ "${TARGET_OS}" = "linux" ]; then
+    if ! command -v zstd >/dev/null 2>&1 && ! command -v unzstd >/dev/null 2>&1; then
+        echo -e "${YELLOW}zstd is required to extract the release package. Attempting automatic install...${RESET}"
+        if command -v apt-get >/dev/null 2>&1; then
+            if [ "$(id -u)" -eq 0 ]; then
+                apt-get update -qq && apt-get install -y -qq zstd tar || true
+            elif command -v sudo >/dev/null 2>&1; then
+                sudo apt-get update -qq && sudo apt-get install -y -qq zstd tar || true
+            fi
+        elif command -v pacman >/dev/null 2>&1; then
+            if [ "$(id -u)" -eq 0 ]; then
+                pacman -Sy --noconfirm zstd tar || true
+            elif command -v sudo >/dev/null 2>&1; then
+                sudo pacman -Sy --noconfirm zstd tar || true
+            fi
+        elif command -v dnf >/dev/null 2>&1; then
+            if [ "$(id -u)" -eq 0 ]; then
+                dnf install -y -q zstd tar || true
+            elif command -v sudo >/dev/null 2>&1; then
+                sudo dnf install -y -q zstd tar || true
+            fi
+        fi
+    fi
 fi
 
 # 3. Fetch Latest Release Version
