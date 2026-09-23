@@ -565,15 +565,13 @@ func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s.tar.gz", latestTag, binaryName),
 		}
 
+		// R2 and GitHub both present valid, trusted CA certificates, so we only
+		// ever use clients that perform full TLS verification here. An
+		// InsecureSkipVerify fallback would let an on-path attacker
+		// transparently MITM the binary update download.
 		clients := []*http.Client{
 			createOptimizedHTTPClient(false),
-			createOptimizedHTTPClient(true),
 			http.DefaultClient,
-			&http.Client{
-				Transport: &http.Transport{
-					TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-				},
-			},
 		}
 		var resp *http.Response
 
@@ -754,15 +752,13 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/latest/download/%s", deltaName),
 	}
 
+	// R2 and GitHub both present valid, trusted CA certificates, so we only
+	// ever use clients that perform full TLS verification here. An
+	// InsecureSkipVerify fallback would let an on-path attacker
+	// transparently MITM the delta patch download.
 	clients := []*http.Client{
 		createOptimizedHTTPClient(false),
-		createOptimizedHTTPClient(true),
 		http.DefaultClient,
-		&http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		},
 	}
 
 	if onProgress != nil {

@@ -335,6 +335,35 @@ func (m *Manager) handleIncomingConnection(conn net.Conn) {
 	m.readLoop(peerConn)
 }
 
+// maxPacketSize bounds a single newline-delimited packet read from a peer.
+// Without this limit, a malicious or misbehaving peer could stream data
+// without ever sending a newline, causing bufio.Reader.ReadBytes to buffer
+// an unbounded amount of data in memory (a memory-exhaustion DoS).
+const maxPacketSize = 10 * 1024 * 1024 // 10 MB
+
+// readBoundedLine reads a single newline-delimited line from reader,
+// aborting with an error if more than maxSize bytes are consumed before a
+// newline is found. It uses bufio.Reader.ReadSlice so the read is bounded
+// by the reader's fixed internal buffer per call, rather than growing an
+// unbounded buffer the way ReadBytes/ReadString would.
+func readBoundedLine(reader *bufio.Reader, maxSize int) ([]byte, error) {
+	var line []byte
+	for {
+		chunk, err := reader.ReadSlice('\n')
+		line = append(line, chunk...)
+		if len(line) > maxSize {
+			return nil, fmt.Errorf("packet exceeds max size of %d bytes", maxSize)
+		}
+		if err == nil {
+			return line, nil
+		}
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		return nil, err
+	}
+}
+
 func (m *Manager) readLoop(p *PeerConnection) {
 	reader := bufio.NewReader(p.Conn)
 	defer func() {
@@ -360,7 +389,7 @@ func (m *Manager) readLoop(p *PeerConnection) {
 		default:
 		}
 
-		line, err := reader.ReadBytes('\n')
+		line, err := readBoundedLine(reader, maxPacketSize)
 		if err != nil {
 			return
 		}

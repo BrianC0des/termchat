@@ -47,6 +47,15 @@ func main() {
 	lanFlag := flag.Bool("lan", false, "Initialize or connect in offline Local LAN mode")
 	flag.Parse()
 
+	// Fall back to the TERMCHAT_PASS environment variable when -pass is not
+	// given on the command line, so the passphrase does not have to be
+	// typed directly into the shell history / process list via -pass.
+	if *passFlag == "" {
+		if envPass := os.Getenv("TERMCHAT_PASS"); envPass != "" {
+			*passFlag = envPass
+		}
+	}
+
 	if *versionFlag || *vFlag {
 		fmt.Printf("TermChat %s (%s/%s)\n", system.AppVersion, runtime.GOOS, runtime.GOARCH)
 		os.Exit(0)
@@ -114,7 +123,10 @@ func main() {
 		}
 		if *lanFlag {
 			wsCfg.Relay = "lan"
-			_ = workspace.SaveConfig(path, wsCfg)
+			if err := workspace.SaveConfig(path, wsCfg); err != nil {
+				fmt.Fprintf(os.Stderr, "[ERR] Failed to save room config: %v\n", err)
+				os.Exit(1)
+			}
 		}
 		fmt.Printf("\n  ╔═══════════════════════════════════════════════════════╗\n")
 		fmt.Printf("  ║      Project Collab Room Initialized Successfully     ║\n")
@@ -202,6 +214,7 @@ func main() {
 	// 5. Start Network services
 	if err := mgr.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "Network error: %v\n", err)
+		os.Exit(1)
 	}
 
 	// 6. Connect to Cloud Room or Auto-Join Project Workspace
