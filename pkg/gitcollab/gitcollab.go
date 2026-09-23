@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -125,6 +126,58 @@ func CaptureDiff(dir string, staged bool) (*DiffResult, error) {
 	}, nil
 }
 
+// dangerousPatchTargets scans raw unified diff content for file targets that
+// could let a patch escape the working tree or tamper with git's own
+// machinery (hooks, config, etc). Patches shared over the network are
+// untrusted input from other peers in the room, so they must never be
+// applied blindly to paths outside the project.
+func dangerousPatchTargets(patchContent string) []string {
+	var offenders []string
+	seen := make(map[string]bool)
+
+	flag := func(path string) {
+		path = strings.TrimSpace(path)
+		if path == "" || path == "/dev/null" || seen[path] {
+			return
+		}
+		// Strip the leading a/ or b/ prefix git uses in diff headers.
+		clean := path
+		if strings.HasPrefix(clean, "a/") || strings.HasPrefix(clean, "b/") {
+			clean = clean[2:]
+		}
+		if filepath.IsAbs(clean) ||
+			strings.HasPrefix(clean, "../") || clean == ".." || strings.Contains(clean, "/../") ||
+			clean == ".git" || strings.HasPrefix(clean, ".git/") {
+			seen[path] = true
+			offenders = append(offenders, path)
+		}
+	}
+
+	for _, line := range strings.Split(patchContent, "\n") {
+		switch {
+		case strings.HasPrefix(line, "diff --git "):
+			parts := strings.Fields(line)
+			if len(parts) >= 4 {
+				flag(parts[2])
+				flag(parts[3])
+			}
+		case strings.HasPrefix(line, "+++ "):
+			flag(strings.TrimPrefix(line, "+++ "))
+		case strings.HasPrefix(line, "--- "):
+			flag(strings.TrimPrefix(line, "--- "))
+		case strings.HasPrefix(line, "rename to "):
+			flag(strings.TrimPrefix(line, "rename to "))
+		case strings.HasPrefix(line, "copy to "):
+			flag(strings.TrimPrefix(line, "copy to "))
+		case strings.HasPrefix(line, "new mode 120000") || strings.HasPrefix(line, "new file mode 120000"):
+			// Symlink creation via a peer-supplied patch can be used to redirect
+			// a later "safe" path write outside the repo. Refuse it outright.
+			offenders = append(offenders, "(symlink creation is not allowed in shared patches)")
+		}
+	}
+	return offenders
+}
+
 // ApplyPatch applies patch content to the local repository directory
 func ApplyPatch(dir string, patchContent string) (string, error) {
 	if dir == "" {
@@ -133,6 +186,10 @@ func ApplyPatch(dir string, patchContent string) (string, error) {
 		if err != nil {
 			return "", err
 		}
+	}
+
+	if offenders := dangerousPatchTargets(patchContent); len(offenders) > 0 {
+		return "", fmt.Errorf("refusing to apply patch: it touches disallowed path(s) %s (patches from peers may only modify files inside the project)", strings.Join(offenders, ", "))
 	}
 
 	// 1. Dry run check
@@ -169,4 +226,39 @@ func GetCurrentBranch(dir string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// GetDirtyFiles returns the list of modified, staged, or untracked files in the repository.
+func GetDirtyFiles(dir string) ([]string, error) {
+	if dir == "" {
+		var err error
+		dir, err = os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	cmd := exec.Command("git", "-C", dir, "status", "--porcelain")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("git status failed: %v", err)
+	}
+
+	var files []string
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
+		line = strings.TrimRight(line, "\r")
+		if len(line) < 4 {
+			continue
+		}
+		filePath := strings.TrimSpace(line[3:])
+		if idx := strings.Index(filePath, " -> "); idx != -1 {
+			filePath = filePath[idx+4:]
+		}
+		filePath = strings.Trim(filePath, "\"")
+		if filePath != "" && !strings.HasPrefix(filePath, ".termchat/") {
+			files = append(files, filePath)
+		}
+	}
+	return files, nil
 }

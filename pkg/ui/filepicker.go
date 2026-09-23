@@ -177,7 +177,7 @@ func (fp *FilePicker) View(width, height int) string {
 	boxWidth := min(width-4, 72)
 	boxHeight := min(height-4, 22)
 
-	title := TitleStyle.Render(":: SELECT FILE TO SEND ::")
+	title := TitleStyle.Render("◆ SELECT FILE TO SEND")
 	currentDirStr := lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).Render(fp.CurrentDir)
 
 	var listLines []string

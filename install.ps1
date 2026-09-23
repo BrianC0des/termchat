@@ -13,7 +13,7 @@ $ExeName = "termchat.exe"
 
 Write-Host ""
 Write-Host "  ╔═══════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-Write-Host "  ║   🚀 TermChat — Terminal Developer Collab Hub         ║" -ForegroundColor Cyan
+Write-Host "  ║   ◆ TermChat — Git & GitHub Collab Hub for Devs       ║" -ForegroundColor Cyan
 Write-Host "  ╚═══════════════════════════════════════════════════════╝" -ForegroundColor Cyan
 Write-Host ""
 
@@ -123,7 +123,7 @@ Write-Host ""
 
 # 8. Post-Install Room Check
 if (Test-Path ".termchat\room.json") {
-    Write-Host "🐙 Found project collab room in current directory (.termchat\room.json)!" -ForegroundColor Cyan
+    Write-Host "⎇ Found project collab room in current directory (.termchat\room.json)!" -ForegroundColor Cyan
     Write-Host "Type 'termchat' to join your team's room immediately."
 } else {
     Write-Host "Type 'termchat' to launch your developer collab room."

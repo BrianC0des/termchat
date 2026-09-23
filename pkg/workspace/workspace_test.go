@@ -3,6 +3,7 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -63,5 +64,58 @@ func TestInitAndFindWorkspace(t *testing.T) {
 	}
 	if foundCfg.Room != "test-room" {
 		t.Errorf("FindWorkspace Room = %s; want test-room", foundCfg.Room)
+	}
+}
+
+func TestPassphraseNeverCommittedToRoomJSON(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "termchat-secret-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cfg, path, err := InitWorkspace(tmpDir, "BrianC0des/test-repo", "test-room", "super-secret-pass", "SHA256:abcd1234", "devchan")
+	if err != nil {
+		t.Fatalf("InitWorkspace failed: %v", err)
+	}
+	if cfg.Passphrase != "super-secret-pass" {
+		t.Errorf("returned cfg should still have the passphrase in memory, got %q", cfg.Passphrase)
+	}
+
+	// The committed room.json must never contain the raw passphrase.
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "super-secret-pass") || strings.Contains(string(raw), "passphrase") {
+		t.Errorf("room.json leaked the passphrase: %s", string(raw))
+	}
+
+	termchatDir := filepath.Dir(path)
+
+	// The secret must live in its own gitignored file with restrictive perms.
+	secretInfo, err := os.Stat(secretPath(termchatDir))
+	if err != nil {
+		t.Fatalf("expected secret file to exist: %v", err)
+	}
+	if perm := secretInfo.Mode().Perm(); perm != 0600 {
+		t.Errorf("secret file perms = %v; want 0600", perm)
+	}
+
+	ignoreData, err := os.ReadFile(filepath.Join(termchatDir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("expected .termchat/.gitignore to exist: %v", err)
+	}
+	if !strings.Contains(string(ignoreData), SecretFileName) {
+		t.Errorf(".termchat/.gitignore does not exclude %s: %s", SecretFileName, string(ignoreData))
+	}
+
+	// Round-tripping via LoadConfig should transparently restore the passphrase.
+	loaded, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if loaded.Passphrase != "super-secret-pass" {
+		t.Errorf("LoadConfig did not recover passphrase from secret file, got %q", loaded.Passphrase)
 	}
 }

@@ -63,6 +63,7 @@ type NetworkEvents struct {
 	OnTopic        func(senderName, topicText string)
 	OnPin          func(senderName, pinText string)
 	OnRoomDestroyed func(senderName string)
+	OnConflictRadar func(senderName, branch string, dirtyFiles []string)
 }
 
 type incomingFileState struct {
@@ -474,6 +475,11 @@ func (m *Manager) handlePacket(p *PeerConnection, pkt *Packet) {
 	case MsgTypePin:
 		if m.events.OnPin != nil {
 			m.events.OnPin(pkt.Sender, pkt.Content)
+		}
+
+	case MsgTypeConflictRadar:
+		if m.events.OnConflictRadar != nil {
+			m.events.OnConflictRadar(pkt.Sender, pkt.GitBranch, pkt.DirtyFiles)
 		}
 
 	case MsgTypeDestroy:
@@ -1490,4 +1496,16 @@ func (m *Manager) BroadcastRoomDestroy() {
 		Content:   "ROOM_DESTROYED",
 	}
 	_ = m.SendPacket(p)
+}
+
+func (m *Manager) SendConflictRadar(branch string, dirtyFiles []string) error {
+	p := &Packet{
+		Type:       MsgTypeConflictRadar,
+		SenderID:   m.LocalID,
+		Sender:     m.LocalName,
+		Timestamp:  time.Now(),
+		GitBranch:  branch,
+		DirtyFiles: dirtyFiles,
+	}
+	return m.SendPacket(p)
 }

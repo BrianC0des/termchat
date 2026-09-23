@@ -5,14 +5,14 @@ import (
 )
 
 var (
-	// Color Palette
-	PrimaryColor   = lipgloss.Color("#7D56F4") // Purple/Indigo accent
-	SecondaryColor = lipgloss.Color("#04B575") // Vibrant Emerald Green
-	AccentColor    = lipgloss.Color("#FF5F87") // Coral / Pink
-	WarningColor   = lipgloss.Color("#E0AF68") // Warm Amber
-	MutedColor     = lipgloss.Color("#565F89") // Slate Gray
-	BgDark         = lipgloss.Color("#1A1B26") // Deep Charcoal
-	BgLight        = lipgloss.Color("#24283B") // Surface Dark
+	// Color Palette — GitHub Dark Primer
+	PrimaryColor   = lipgloss.Color("#58A6FF") // GitHub Blue
+	SecondaryColor = lipgloss.Color("#3FB950") // GitHub Green
+	AccentColor    = lipgloss.Color("#BC8CFF") // GitHub Purple
+	WarningColor   = lipgloss.Color("#D29922") // GitHub Amber / Yellow
+	MutedColor     = lipgloss.Color("#8B949E") // GitHub Muted Gray
+	BgDark         = lipgloss.Color("#0D1117") // GitHub Canvas Default
+	BgLight        = lipgloss.Color("#161B22") // GitHub Canvas Subtle
 
 	// Header Styles
 	TitleStyle = lipgloss.NewStyle().
@@ -22,70 +22,70 @@ var (
 			Padding(0, 1)
 
 	SubTitleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#7AA2F7")).
+			Foreground(PrimaryColor).
 			Bold(true)
 
 	BadgeOnline = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#10B981")).
+			Foreground(SecondaryColor).
 			SetString("● ONLINE")
 
 	BadgeOffline = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#EF4444")).
+			Foreground(lipgloss.Color("#F85149")).
 			SetString("○ OFFLINE")
 
 	HeaderBox = lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder(), false, false, true, false).
-			BorderForeground(lipgloss.Color("#3B4261")).
+			BorderForeground(lipgloss.Color("#30363D")).
 			Padding(0, 1)
 
 	// Layout Containers
 	SidebarStyle = lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder(), false, true, false, false).
-			BorderForeground(lipgloss.Color("#3B4261")).
+			BorderForeground(lipgloss.Color("#30363D")).
 			Padding(0, 1)
 
 	ChatBoxStyle = lipgloss.NewStyle().
 			Padding(0, 1)
 
 	StatusBar = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#A9B1D6")).
-			Background(lipgloss.Color("#1F2335")).
+			Foreground(lipgloss.Color("#E6EDF3")).
+			Background(lipgloss.Color("#161B22")).
 			Padding(0, 1)
 
 	// Messages Styling
 	SenderMeStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#7AA2F7"))
+			Foreground(PrimaryColor)
 
 	SenderPeerStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#9ECE6A"))
+			Foreground(SecondaryColor)
 
 	SenderBotStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#BB9AF7"))
+			Foreground(AccentColor)
 
 	SenderSystemStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("#E0AF68"))
+				Foreground(WarningColor)
 
 	TimeStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#565F89"))
+			Foreground(MutedColor)
 
 	MessageText = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#C0CAF5"))
+			Foreground(lipgloss.Color("#E6EDF3"))
 
 	FileNoticeStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#BB9AF7")).
-			Background(lipgloss.Color("#24283B")).
+			Foreground(AccentColor).
+			Background(BgLight).
 			Padding(0, 1)
 
 	ErrorNoticeStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("#F7768E"))
+				Foreground(lipgloss.Color("#F85149"))
 
 	// Input Box
 	InputPromptStyle = lipgloss.NewStyle().
@@ -99,8 +99,8 @@ var (
 
 	HelpKeyStyle = lipgloss.NewStyle().
 			Bold(true).
-			Foreground(lipgloss.Color("#7DCFFF"))
+			Foreground(PrimaryColor)
 
 	HelpDescStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#565F89"))
+			Foreground(MutedColor)
 )

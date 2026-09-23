@@ -20,6 +20,18 @@ type ThemePalette struct {
 }
 
 var Themes = map[string]ThemePalette{
+	"github-dark": {
+		Name:        "GitHub Dark Primer",
+		Primary:     lipgloss.Color("#58A6FF"), // GitHub Blue
+		Secondary:   lipgloss.Color("#3FB950"), // GitHub Green
+		Accent:      lipgloss.Color("#BC8CFF"), // GitHub Purple
+		Warning:     lipgloss.Color("#D29922"), // GitHub Amber
+		Muted:       lipgloss.Color("#8B949E"), // GitHub Gray
+		BgDark:      lipgloss.Color("#0D1117"), // Canvas Default
+		BgLight:     lipgloss.Color("#161B22"), // Canvas Subtle
+		Text:        lipgloss.Color("#E6EDF3"), // Foreground Default
+		BorderColor: lipgloss.Color("#30363D"), // Border Default
+	},
 	"matrix": {
 		Name:        "Matrix Movie Hacker",
 		Primary:     lipgloss.Color("#00FF41"),
@@ -106,10 +118,13 @@ var Themes = map[string]ThemePalette{
 	},
 }
 
-var CurrentTheme = "tokyo-night"
+var CurrentTheme = "github-dark"
 
 func ApplyTheme(name string) bool {
 	themeKey := strings.ToLower(strings.TrimSpace(name))
+	if themeKey == "github" {
+		themeKey = "github-dark"
+	}
 	palette, exists := Themes[themeKey]
 	if !exists {
 		return false

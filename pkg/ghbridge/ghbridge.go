@@ -194,9 +194,9 @@ func FetchCIStatus(repo, branch string) (string, error) {
 
 // FormatIssueCard formats an Issue into a clean, foldable card
 func FormatIssueCard(iss *IssueDetails) string {
-	stateIcon := "[OPEN]"
+	stateIcon := "⊙ OPEN"
 	if strings.ToUpper(iss.State) == "CLOSED" {
-		stateIcon = "[CLOSED]"
+		stateIcon = "⊘ CLOSED"
 	}
 
 	labelsStr := ""
@@ -209,17 +209,17 @@ func FormatIssueCard(iss *IssueDetails) string {
 		bodyContent = "(No description provided)"
 	}
 
-	return fmt.Sprintf("```github-issue\n[ISSUE #%d] %s\n• Status: %s • Author: @%s%s\n• Link: %s\n──────────────────────────────────────────────────────────\n%s\n```",
+	return fmt.Sprintf("```github-issue\n⊙ ISSUE #%d — %s\n• Status: %s • Author: @%s%s\n• URL: %s\n──────────────────────────────────────────────────────────\n%s\n```",
 		iss.Number, iss.Title, stateIcon, iss.Author, labelsStr, iss.URL, bodyContent)
 }
 
 // FormatPRCard formats a PR into a clean, foldable card
 func FormatPRCard(pr *PRDetails) string {
-	stateIcon := "[OPEN]"
+	stateIcon := "⌁ OPEN"
 	if strings.ToUpper(pr.State) == "MERGED" {
-		stateIcon = "[MERGED]"
+		stateIcon = "✓ MERGED"
 	} else if strings.ToUpper(pr.State) == "CLOSED" {
-		stateIcon = "[CLOSED]"
+		stateIcon = "✗ CLOSED"
 	}
 
 	reviewStr := ""
@@ -232,6 +232,6 @@ func FormatPRCard(pr *PRDetails) string {
 		bodyContent = "(No description provided)"
 	}
 
-	return fmt.Sprintf("```github-pr\n[PR #%d] %s\n• Status: %s%s • Author: @%s\n• Branch: %s -> %s (+%d/-%d)\n• Link: %s\n──────────────────────────────────────────────────────────\n%s\n```",
+	return fmt.Sprintf("```github-pr\n⌁ PR #%d — %s\n• Status: %s%s • Author: @%s\n• ⎇ %s → %s (+%d/-%d)\n• URL: %s\n──────────────────────────────────────────────────────────\n%s\n```",
 		pr.Number, pr.Title, stateIcon, reviewStr, pr.Author, pr.HeadRefName, pr.BaseRefName, pr.Additions, pr.Deletions, pr.URL, bodyContent)
 }

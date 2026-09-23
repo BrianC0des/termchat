@@ -21,7 +21,7 @@ RESET="\033[0m"
 
 echo -e "${CYAN}${BOLD}"
 echo "  ╔═══════════════════════════════════════════════════════╗"
-echo "  ║   🚀 TermChat — Terminal Developer Collab Hub         ║"
+echo "  ║   ◆ TermChat — Git & GitHub Collab Hub for Devs       ║"
 echo "  ╚═══════════════════════════════════════════════════════╝"
 echo -e "${RESET}"
 
@@ -239,7 +239,7 @@ esac
 
 # 9. Smart Post-Install Hook: Check for .termchat/room.json in current directory
 if [ -f ".termchat/room.json" ]; then
-    echo -e "${CYAN}🐙 Found project collab room in current directory (.termchat/room.json)!${RESET}"
+    echo -e "${CYAN}⎇ Found project collab room in current directory (.termchat/room.json)!${RESET}"
     echo -e "Type ${BOLD}termchat${RESET} to join your team's room immediately."
 else
     echo -e "Type ${BOLD}termchat${RESET} to launch your developer collab room."

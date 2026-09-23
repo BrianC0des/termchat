@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -112,7 +113,17 @@ type Model struct {
 	destroyCode string
 	destroyRoom string
 
-	gitBranch string
+	gitBranch      string
+	peerGitStates  map[string]PeerGitState
+	myDirtyFiles   []string
+	radarConflicts []string
+	radarTickCount int
+}
+
+type PeerGitState struct {
+	Branch     string
+	DirtyFiles []string
+	UpdatedAt  time.Time
 }
 
 type SidebarMode int
@@ -125,6 +136,12 @@ const (
 
 // Custom Tea Messages
 type updateProgressMsg string
+
+type conflictRadarMsg struct {
+	senderName string
+	branch     string
+	dirtyFiles []string
+}
 
 type editorFinishedMsg struct {
 	err      error
@@ -274,6 +291,13 @@ func NewModel(mgr *network.Manager) *Model {
 		pinnedMsgs:          make([]ChatMessage, 0),
 		pastedSnippets:      make(map[string]string),
 		gitBranch:           gitcollab.GetCurrentBranch(""),
+		peerGitStates:       make(map[string]PeerGitState),
+	}
+
+	if m.gitBranch != "" {
+		if dirty, err := gitcollab.GetDirtyFiles(""); err == nil {
+			m.myDirtyFiles = dirty
+		}
 	}
 
 	// Pro Feature: Silent Background Pre-fetching of updates while user chats!
@@ -693,8 +717,28 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// 3. Periodic Git Conflict Radar scan (every 4 seconds)
+		m.radarTickCount++
+		if m.radarTickCount%4 == 0 {
+			m.checkLocalRadar()
+		}
+
 	case updateProgressMsg:
 		m.updateStatus = string(msg)
+		return m, nil
+
+	case conflictRadarMsg:
+		prevConflicts := len(m.radarConflicts)
+		m.peerGitStates[msg.senderName] = PeerGitState{
+			Branch:     msg.branch,
+			DirtyFiles: msg.dirtyFiles,
+			UpdatedAt:  time.Now(),
+		}
+		m.radarConflicts = m.recomputeRadarConflicts()
+		if len(m.radarConflicts) > 0 && len(m.radarConflicts) != prevConflicts {
+			m.setToast(fmt.Sprintf("▲ CONFLICT RADAR: %d colliding file(s) with @%s!", len(m.radarConflicts), msg.senderName), 6*time.Second)
+		}
+		m.recalculateViewport()
 		return m, nil
 
 	case incomingMsg:
@@ -766,6 +810,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			action := "joined"
 			if !msg.joined {
 				action = "left"
+				delete(m.peerGitStates, msg.name)
+				prevLen := len(m.radarConflicts)
+				m.radarConflicts = m.recomputeRadarConflicts()
+				if len(m.radarConflicts) != prevLen {
+					m.recalculateViewport()
+				}
+			} else {
+				if m.gitBranch != "" {
+					_ = m.manager.SendConflictRadar(m.gitBranch, m.myDirtyFiles)
+				}
 			}
 			m.setToast(fmt.Sprintf("[NET] %s has %s", msg.name, action), 4*time.Second)
 		}
@@ -1795,7 +1849,67 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		if wsCfg.Repo != "" {
 			repoInfo = fmt.Sprintf("\n• Repository: %s", wsCfg.Repo)
 		}
-		m.addSystemMsg(fmt.Sprintf("[WORKSPACE] Project Collab Room Initialized!\n• Config File: %s%s\n• Collab Room: #%s\n• Commit .termchat/room.json to git so teammates auto-join on 'git clone'!", path, repoInfo, wsCfg.Room))
+		secretNote := ""
+		if wsCfg.Passphrase != "" {
+			secretNote = "\n• Passphrase saved locally to .termchat/secret.local.json (gitignored, NOT committed) — share it with teammates over a separate trusted channel."
+		}
+		m.addSystemMsg(fmt.Sprintf("[WORKSPACE] Project Collab Room Initialized!\n• Config File: %s%s\n• Collab Room: #%s\n• Commit .termchat/room.json to git so teammates auto-join on 'git clone'!%s", path, repoInfo, wsCfg.Room, secretNote))
+
+	case "/radar", "/conflicts":
+		m.checkLocalRadar()
+		var sb strings.Builder
+		sb.WriteString("◆ GIT CONFLICT RADAR\n")
+		if m.gitBranch == "" {
+			sb.WriteString("  (Not currently inside a git repository)\n")
+		} else {
+			sb.WriteString(fmt.Sprintf("Local: ⎇ %s (%d uncommitted file(s))\n", m.gitBranch, len(m.myDirtyFiles)))
+			for _, f := range m.myDirtyFiles {
+				isConflict := false
+				var collidingPeers []string
+				for pName, pState := range m.peerGitStates {
+					for _, pf := range pState.DirtyFiles {
+						if pf == f {
+							isConflict = true
+							collidingPeers = append(collidingPeers, "@"+pName)
+						}
+					}
+				}
+				if isConflict {
+					sb.WriteString(fmt.Sprintf("  ▲ %s  [COLLISION with %s]\n", lipgloss.NewStyle().Foreground(lipgloss.Color("#F85149")).Bold(true).Render(f), strings.Join(collidingPeers, ", ")))
+				} else {
+					sb.WriteString(fmt.Sprintf("  • %s\n", f))
+				}
+			}
+			if len(m.peerGitStates) == 0 {
+				sb.WriteString("\nTeammates: (No peers reporting git status in room)\n")
+			} else {
+				sb.WriteString("\nTeammates:\n")
+				for pName, pState := range m.peerGitStates {
+					sb.WriteString(fmt.Sprintf("  ● @%s (⎇ %s, %d dirty)\n", pName, pState.Branch, len(pState.DirtyFiles)))
+					for _, pf := range pState.DirtyFiles {
+						isConflict := false
+						for _, mf := range m.myDirtyFiles {
+							if mf == pf {
+								isConflict = true
+								break
+							}
+						}
+						if isConflict {
+							sb.WriteString(fmt.Sprintf("    ▲ %s  [COLLISION]\n", lipgloss.NewStyle().Foreground(lipgloss.Color("#F85149")).Bold(true).Render(pf)))
+						} else {
+							sb.WriteString(fmt.Sprintf("    • %s\n", pf))
+						}
+					}
+				}
+			}
+			if len(m.radarConflicts) > 0 {
+				sb.WriteString(fmt.Sprintf("\n▲ WARNING: %d file collision(s) detected! Coordinate with teammates to prevent merge collisions.", len(m.radarConflicts)))
+			} else {
+				sb.WriteString("\n✓ Radar clear: No file collisions detected with teammates.")
+			}
+		}
+		m.addSystemMsg(sb.String())
+		return
 
 	case "/diff", "/patch":
 		staged := len(parts) > 1 && (parts[1] == "staged" || parts[1] == "--staged" || parts[1] == "--cached")
@@ -2316,7 +2430,7 @@ func (m *Model) renderMessages() string {
 				replyQuote := lipgloss.NewStyle().
 					Foreground(MutedColor).
 					Italic(true).
-					Render(fmt.Sprintf("   |- Replying to #%d (%s: \"%s\")", msg.ReplyToNum, msg.ReplyToSender, msg.ReplyToText))
+					Render(fmt.Sprintf("   ↳ Replying to #%d (@%s: \"%s\")", msg.ReplyToNum, msg.ReplyToSender, msg.ReplyToText))
 				sb.WriteString(replyQuote + "\n")
 			}
 
@@ -2341,7 +2455,7 @@ func (m *Model) renderMessages() string {
 					sb.WriteString("\n")
 				}
 				prefix := fmt.Sprintf("%s%s", numBadge, timerBadge)
-				nameTag := getUserNameStyle(msg.SenderName, msg.IsMe).Render(fmt.Sprintf("[%s]:", msg.SenderName))
+				nameTag := getUserNameStyle(msg.SenderName, msg.IsMe).Render(fmt.Sprintf("@%s:", msg.SenderName))
 				firstLinePrefix := fmt.Sprintf("%s %s", prefix, nameTag)
 				firstWidth := lipgloss.Width(firstLinePrefix)
 				padLen := 0
@@ -2417,6 +2531,13 @@ func SetupEventBridge(p *tea.Program) network.NetworkEvents {
 		OnRoomDestroyed: func(senderName string) {
 			p.Send(roomDestroyedMsg{senderName: senderName})
 		},
+		OnConflictRadar: func(senderName, branch string, dirtyFiles []string) {
+			p.Send(conflictRadarMsg{
+				senderName: senderName,
+				branch:     branch,
+				dirtyFiles: dirtyFiles,
+			})
+		},
 	}
 }
 
@@ -2485,8 +2606,12 @@ func (m *Model) recalculateViewport() {
 	if m.updateStatus != "" {
 		updateHeight = 1
 	}
+	radarHeight := 0
+	if len(m.radarConflicts) > 0 {
+		radarHeight = 1
+	}
 
-	vpHeight := m.height - headerHeight - inputHeight - transferHeight - updateHeight - 2
+	vpHeight := m.height - headerHeight - inputHeight - transferHeight - updateHeight - radarHeight - 2
 	if vpHeight < 4 {
 		vpHeight = 4
 	}
@@ -2518,5 +2643,59 @@ func (m *Model) recalculateViewport() {
 		m.viewport.KeyMap = viewport.KeyMap{}
 		m.viewport.SetContent(m.renderMessages())
 	}
+}
+
+func (m *Model) checkLocalRadar() {
+	currBranch := gitcollab.GetCurrentBranch("")
+	if currBranch != "" {
+		m.gitBranch = currBranch
+		dirty, err := gitcollab.GetDirtyFiles("")
+		if err == nil {
+			dirtyChanged := len(dirty) != len(m.myDirtyFiles)
+			if !dirtyChanged {
+				for i := range dirty {
+					if dirty[i] != m.myDirtyFiles[i] {
+						dirtyChanged = true
+						break
+					}
+				}
+			}
+			if dirtyChanged || m.radarTickCount == 4 {
+				m.myDirtyFiles = dirty
+				_ = m.manager.SendConflictRadar(m.gitBranch, m.myDirtyFiles)
+				prevConflicts := len(m.radarConflicts)
+				m.radarConflicts = m.recomputeRadarConflicts()
+				if len(m.radarConflicts) != prevConflicts {
+					m.recalculateViewport()
+				}
+			}
+		}
+	}
+}
+
+func (m *Model) recomputeRadarConflicts() []string {
+	if len(m.myDirtyFiles) == 0 {
+		return nil
+	}
+	mySet := make(map[string]bool)
+	for _, f := range m.myDirtyFiles {
+		mySet[f] = true
+	}
+
+	conflictSet := make(map[string]bool)
+	for _, peer := range m.peerGitStates {
+		for _, pf := range peer.DirtyFiles {
+			if mySet[pf] {
+				conflictSet[pf] = true
+			}
+		}
+	}
+
+	var res []string
+	for f := range conflictSet {
+		res = append(res, f)
+	}
+	sort.Strings(res)
+	return res
 }
 

@@ -41,23 +41,23 @@ func (m *Model) View() string {
 	var statusBadge string
 	if m.manager.RoomName != "" {
 		modeBadge = lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).
-			Render(fmt.Sprintf("[ROOM] #%s", m.manager.RoomName))
+			Render(fmt.Sprintf("#%s", m.manager.RoomName))
 		if peerCount > 0 {
 			statusBadge = lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).
-				Render(fmt.Sprintf("[ONLINE] (%d)", peerCount+1))
+				Render(fmt.Sprintf("● ONLINE (%d)", peerCount+1))
 		} else {
 			statusBadge = lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).
-				Render("[RELAY] (1)")
+				Render("○ RELAY (1)")
 		}
 	} else {
 		modeBadge = lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).
-			Render("[LAN] Direct P2P")
+			Render("LAN P2P")
 		if peerCount > 0 {
 			statusBadge = lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).
-				Render(fmt.Sprintf("[P2P] (%d)", peerCount))
+				Render(fmt.Sprintf("● P2P (%d)", peerCount))
 		} else {
 			statusBadge = lipgloss.NewStyle().Foreground(WarningColor).Bold(true).
-				Render("[SEARCHING LAN...]")
+				Render("○ SEARCHING LAN...")
 		}
 	}
 
@@ -65,7 +65,7 @@ func (m *Model) View() string {
 	var lockBadge string
 	if m.manager.EncryptionKey != nil {
 		keyCode := system.GenerateKeyFingerprint(m.manager.EncryptionKey)
-		lockBadge = lipgloss.NewStyle().Foreground(AccentColor).Bold(true).Render(fmt.Sprintf(" [AES-256: %s]", keyCode))
+		lockBadge = lipgloss.NewStyle().Foreground(AccentColor).Bold(true).Render(fmt.Sprintf(" ⚿ %s", keyCode))
 	}
 
 	// Room TTL countdown pill
@@ -80,32 +80,32 @@ func (m *Model) View() string {
 			if hours > 0 {
 				timeStr = fmt.Sprintf("%02dh %02dm", hours, mins%60)
 			}
-			ttlBadge = " " + lipgloss.NewStyle().Foreground(WarningColor).Background(BgLight).Bold(true).Padding(0, 1).Render(fmt.Sprintf("[TTL: %s]", timeStr))
+			ttlBadge = " " + lipgloss.NewStyle().Foreground(WarningColor).Background(BgLight).Bold(true).Padding(0, 1).Render(fmt.Sprintf("TTL: %s", timeStr))
 		}
 	}
 
 	// Auto-delete / Disappearing message badge
 	var autoDeleteBadge string
 	if m.autoDeleteTTL > 0 {
-		autoDeleteBadge = " " + lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render(fmt.Sprintf("[AUTODELETE: %s]", m.autoDeleteTTL))
+		autoDeleteBadge = " " + lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render(fmt.Sprintf("AUTODEL: %s", m.autoDeleteTTL))
 	}
 
 	// Git active branch badge
 	var gitBadge string
 	if m.gitBranch != "" {
-		gitBadge = " " + lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render(fmt.Sprintf("[git:%s]", m.gitBranch))
+		gitBadge = " " + lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).Render(fmt.Sprintf("⎇ %s", m.gitBranch))
 	}
 
 	headerLeft := lipgloss.JoinHorizontal(
 		lipgloss.Center,
-		TitleStyle.Render(":: TERMCHAT ::"),
+		TitleStyle.Render("◆ termchat"),
 		" ",
 		modeBadge,
 		gitBadge,
 		ttlBadge,
 		autoDeleteBadge,
 		" ",
-		SubTitleStyle.Render(fmt.Sprintf("[%s]", m.manager.LocalName)),
+		SubTitleStyle.Render(fmt.Sprintf("@%s", m.manager.LocalName)),
 	)
 
 	headerRight := lipgloss.JoinHorizontal(
@@ -197,7 +197,7 @@ func (m *Model) View() string {
 	}
 
 	// 5. Input Line with Bottom-Right Version Display
-	prompt := InputPromptStyle.Render(fmt.Sprintf("%s@termchat:~$ ", m.manager.LocalName))
+	prompt := InputPromptStyle.Render(fmt.Sprintf("%s » ", m.manager.LocalName))
 	verStr := system.AppVersion
 	if !strings.HasPrefix(verStr, "v") {
 		verStr = "v" + verStr
@@ -235,6 +235,23 @@ func (m *Model) View() string {
 			Render(m.updateStatus)
 	}
 
+	var radarBanner string
+	if len(m.radarConflicts) > 0 {
+		var conflictInfo string
+		if len(m.radarConflicts) == 1 {
+			conflictInfo = fmt.Sprintf("file `%s` is also being edited by peers!", m.radarConflicts[0])
+		} else {
+			conflictInfo = fmt.Sprintf("%d files colliding with peers (%s)!", len(m.radarConflicts), strings.Join(m.radarConflicts, ", "))
+		}
+		radarBanner = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Background(lipgloss.Color("#DA3633")).
+			Bold(true).
+			Padding(0, 1).
+			Width(m.width).
+			Render(fmt.Sprintf("▲ CONFLICT RADAR: %s (type /radar for details)", conflictInfo))
+	}
+
 	var toastBanner string
 	if m.toastMsg != "" && time.Now().Before(m.toastExpires) {
 		toastBanner = lipgloss.NewStyle().
@@ -243,11 +260,15 @@ func (m *Model) View() string {
 			Bold(true).
 			Padding(0, 1).
 			Width(m.width).
-			Render(fmt.Sprintf(":: %s", m.toastMsg))
+			Render(fmt.Sprintf("» %s", m.toastMsg))
 	}
 
 	var layout []string
-	layout = append(layout, headerBar, body)
+	layout = append(layout, headerBar)
+	if radarBanner != "" {
+		layout = append(layout, radarBanner)
+	}
+	layout = append(layout, body)
 	if transferBar != "" {
 		layout = append(layout, transferBar)
 	}
@@ -277,12 +298,12 @@ func (m *Model) renderSidebar(peers []network.PeerConnection, width int) string 
 	var sb strings.Builder
 
 	totalCount := len(peers) + 1
-	dropdownIcon := "v"
+	dropdownIcon := "▾"
 	if !m.showMembersDropdown {
-		dropdownIcon = ">"
+		dropdownIcon = "▸"
 	}
 
-	headerText := fmt.Sprintf("MEMBERS (%d) %s", totalCount, dropdownIcon)
+	headerText := fmt.Sprintf("TEAM (%d) %s", totalCount, dropdownIcon)
 	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(PrimaryColor).Render(headerText))
 	sb.WriteString(lipgloss.NewStyle().Foreground(MutedColor).Render(" [F2]"))
 	sb.WriteString("\n")
@@ -309,15 +330,15 @@ func (m *Model) renderSidebar(peers []network.PeerConnection, width int) string 
 			}
 		}
 		sb.WriteString(fmt.Sprintf("%s %s %s%s\n",
-			lipgloss.NewStyle().Foreground(SecondaryColor).Render("*"),
+			lipgloss.NewStyle().Foreground(SecondaryColor).Render("●"),
 			MessageText.Render(myName),
-			lipgloss.NewStyle().Foreground(WarningColor).Render("(You)"),
+			lipgloss.NewStyle().Foreground(MutedColor).Render("(you)"),
 			lipgloss.NewStyle().Foreground(PrimaryColor).Render(statusStr),
 		))
 
 		// Show Connected Peers
 		if len(peers) == 0 {
-			sb.WriteString(lipgloss.NewStyle().Foreground(MutedColor).Render("  (No peers)\n"))
+			sb.WriteString(lipgloss.NewStyle().Foreground(MutedColor).Render("  (no peers)\n"))
 		} else {
 			for _, p := range peers {
 				peerName := p.Name
@@ -335,10 +356,27 @@ func (m *Model) renderSidebar(peers []network.PeerConnection, width int) string 
 				if len(peerName) > maxNameLen {
 					peerName = peerName[:maxNameLen-2] + ".."
 				}
-				sb.WriteString(fmt.Sprintf("%s %s%s\n",
-					lipgloss.NewStyle().Foreground(SecondaryColor).Render("*"),
+
+				conflictBadge := ""
+				if pState, ok := m.peerGitStates[peerName]; ok {
+					for _, pf := range pState.DirtyFiles {
+						for _, mf := range m.myDirtyFiles {
+							if mf == pf {
+								conflictBadge = " " + lipgloss.NewStyle().Foreground(lipgloss.Color("#F85149")).Bold(true).Render("▲")
+								break
+							}
+						}
+						if conflictBadge != "" {
+							break
+						}
+					}
+				}
+
+				sb.WriteString(fmt.Sprintf("%s %s%s%s\n",
+					lipgloss.NewStyle().Foreground(SecondaryColor).Render("●"),
 					lipgloss.NewStyle().Foreground(PrimaryColor).Render(peerName),
 					lipgloss.NewStyle().Foreground(SecondaryColor).Render(peerStatus),
+					conflictBadge,
 				))
 			}
 		}
@@ -367,15 +405,14 @@ func (m *Model) renderSidebar(peers []network.PeerConnection, width int) string 
 	}
 
 	sb.WriteString("\n")
-	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(PrimaryColor).Render("COMMANDS"))
+	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(PrimaryColor).Render("GIT COLLAB"))
 	sb.WriteString("\n")
-	sb.WriteString(fmt.Sprintf("%s /reply <#>\n%s /theme <name>\n%s /pin <#>\n%s /copy <#>\n%s /files [^F]\n%s /browse [^O]",
-		HelpKeyStyle.Render(">"),
-		HelpKeyStyle.Render(">"),
-		HelpKeyStyle.Render(">"),
-		HelpKeyStyle.Render(">"),
-		HelpKeyStyle.Render(">"),
-		HelpKeyStyle.Render(">"),
+	sb.WriteString(fmt.Sprintf("%s /radar (conflicts)\n%s /diff  (share WIP)\n%s /apply <id>\n%s /pr /issue /ci\n%s /files [^F]",
+		HelpKeyStyle.Render("»"),
+		HelpKeyStyle.Render("»"),
+		HelpKeyStyle.Render("»"),
+		HelpKeyStyle.Render("»"),
+		HelpKeyStyle.Render("»"),
 	))
 
 	sb.WriteString("\n\n")
@@ -405,14 +442,15 @@ func (m *Model) renderHelpView() string {
 		Width(boxWidth).
 		Height(boxHeight)
 
-	title := TitleStyle.Render(":: TERMCHAT COMMAND & KEYBOARD SHORTCUTS ::")
-	sectionDev := lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render(":: DEVELOPER COLLAB & GIT ::")
-	sectionRoom := lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).Render(":: ROOMS & MESSAGING ::")
-	sectionFiles := lipgloss.NewStyle().Foreground(AccentColor).Bold(true).Render(":: FILES & NAVIGATION ::")
+	title := TitleStyle.Render("◆ SHORTCUTS & COMMAND REFERENCE")
+	sectionDev := lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render("◆ GIT & DEVELOPER COLLAB")
+	sectionRoom := lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).Render("◆ ROOMS & SECURITY")
+	sectionFiles := lipgloss.NewStyle().Foreground(AccentColor).Bold(true).Render("◆ WORKSPACE & FILES")
 
 	content := fmt.Sprintf(`%s
 
 %s
+  %s %s
   %s %s
   %s %s
   %s %s
@@ -440,6 +478,7 @@ func (m *Model) renderHelpView() string {
   %s`,
 		title,
 		sectionDev,
+		HelpKeyStyle.Render("/radar /conflicts"), HelpDescStyle.Render("Live conflict radar: inspect colliding uncommitted files"),
 		HelpKeyStyle.Render("/diff / /patch   "), HelpDescStyle.Render("Broadcast uncommitted Git diff card (#patch-xxxx)"),
 		HelpKeyStyle.Render("/apply <id>      "), HelpDescStyle.Render("Safely apply patch directly to your local workspace"),
 		HelpKeyStyle.Render("/branch /checkout"), HelpDescStyle.Render("Inspect current git branch or switch branches (/switch)"),
@@ -461,7 +500,7 @@ func (m *Model) renderHelpView() string {
 		HelpKeyStyle.Render("Ctrl+F / /files  "), HelpDescStyle.Render("Open Shared Files Vault modal with custom icons"),
 		HelpKeyStyle.Render("/get <id|#|name> "), HelpDescStyle.Render("1-command download shared room file or URL"),
 		HelpKeyStyle.Render("F2 / F3 (Ctrl+B) "), HelpDescStyle.Render("Toggle members dropdown / sidebar width mode"),
-		HelpKeyStyle.Render("/theme <name>    "), HelpDescStyle.Render("Switch UI theme (catppuccin, dracula, nord, matrix)"),
+		HelpKeyStyle.Render("/theme <name>    "), HelpDescStyle.Render("Switch UI theme (github, catppuccin, dracula, nord)"),
 		HelpKeyStyle.Render("/clear / /quit   "), HelpDescStyle.Render("Clear chat buffer / Quit TermChat (Ctrl+C)"),
 
 		lipgloss.NewStyle().Foreground(SecondaryColor).Render("Press ESC, F1, or Enter to return to chat..."),
@@ -484,7 +523,7 @@ func (m *Model) renderQRView() string {
 		Padding(1, 2).
 		Width(boxWidth)
 
-	title := TitleStyle.Render(":: WI-FI PAIRING QR CODE ::")
+	title := TitleStyle.Render("◆ WI-FI PAIRING QR CODE")
 	content := fmt.Sprintf("%s\n\n%s\n\n%s",
 		title,
 		m.qrContent,
@@ -509,7 +548,7 @@ func (m *Model) renderFilesModal() string {
 		Width(boxWidth)
 
 	var sb strings.Builder
-	title := TitleStyle.Render(":: ROOM SHARED FILES VAULT ::")
+	title := TitleStyle.Render("◆ ROOM SHARED FILES VAULT")
 	sb.WriteString(fmt.Sprintf("%s (Total: %d)\n", title, len(m.sharedFiles)))
 	sb.WriteString(lipgloss.NewStyle().Foreground(MutedColor).Render("Use ^/v to select, [Enter] to download, [O] open link in browser\n\n"))
 

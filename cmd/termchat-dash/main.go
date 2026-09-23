@@ -427,7 +427,7 @@ func (m model) View() string {
 	)
 
 	matrixBox := boxStyle.Width(containerWidth - 2).Render(
-		headerStyle.Render(fmt.Sprintf("📦 ALL-OS PLATFORM RELEASE MATRIX  (%d/%d PUBLISHED)", readyCount, len(m.platforms))) + "\n\n" + matrixContent,
+		headerStyle.Render(fmt.Sprintf("◆ ALL-OS PLATFORM RELEASE MATRIX  (%d/%d PUBLISHED)", readyCount, len(m.platforms))) + "\n\n" + matrixContent,
 	)
 
 	infraRows := []string{
@@ -440,7 +440,7 @@ func (m model) View() string {
 	}
 
 	infraBox := boxStyle.Width(containerWidth - 2).Render(
-		headerStyle.Render("📊 MULTI-MIRROR LATENCY & INFRASTRUCTURE") + "\n\n" + strings.Join(infraRows, "\n"),
+		headerStyle.Render("◆ MULTI-MIRROR LATENCY & INFRASTRUCTURE") + "\n\n" + strings.Join(infraRows, "\n"),
 	)
 
 	var filteredLogs []string
@@ -472,7 +472,7 @@ func (m model) View() string {
 	}
 
 	logsBox := boxStyle.Width(containerWidth - 2).Render(
-		headerStyle.Render(fmt.Sprintf("📜 TELEMETRY STREAM  [FILTER: %s]", m.logFilter)) + "\n\n" +
+		headerStyle.Render(fmt.Sprintf("◆ TELEMETRY STREAM  [FILTER: %s]", m.logFilter)) + "\n\n" +
 			strings.Join(formattedLogs, "\n"),
 	)
 

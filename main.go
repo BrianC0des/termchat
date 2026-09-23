@@ -129,7 +129,13 @@ func main() {
 		} else {
 			fmt.Printf("  • Mode:        Cloud Relay (24/7 Global)\n")
 		}
-		fmt.Printf("\n  • Commit .termchat/room.json to git so collaborators auto-join on 'git clone'!\n\n")
+		fmt.Printf("\n  • Commit .termchat/room.json to git so collaborators auto-join on 'git clone'!\n")
+		if *passFlag != "" {
+			fmt.Printf("  • Your passphrase was saved locally to .termchat/secret.local.json (gitignored) — it is NOT committed.\n")
+			fmt.Printf("    Share it with teammates over a separate, trusted channel (not in the repo).\n\n")
+		} else {
+			fmt.Printf("\n")
+		}
 		os.Exit(0)
 	}
 

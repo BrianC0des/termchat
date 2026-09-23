@@ -32,6 +32,7 @@ const (
 	MsgTypeTopic       MsgType = "topic"
 	MsgTypePin         MsgType = "pin"
 	MsgTypeDestroy     MsgType = "room_destroy"
+	MsgTypeConflictRadar MsgType = "conflict_radar"
 )
 
 type Packet struct {
@@ -62,6 +63,10 @@ type Packet struct {
 	Action    string `json:"action,omitempty"`
 	URL       string `json:"url,omitempty"`
 	ExtraData string `json:"extra_data,omitempty"`
+
+	// Git Conflict Radar payload
+	GitBranch  string   `json:"git_branch,omitempty"`
+	DirtyFiles []string `json:"dirty_files,omitempty"`
 }
 
 func EncodePacket(p *Packet) ([]byte, error) {
