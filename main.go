@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"context"
+	"termchat/pkg/ghauth"
 	"termchat/pkg/network"
 	"termchat/pkg/system"
 	"termchat/pkg/ui"
@@ -58,6 +60,61 @@ func main() {
 
 	if *versionFlag || *vFlag {
 		fmt.Printf("TermChat %s (%s/%s)\n", system.AppVersion, runtime.GOOS, runtime.GOARCH)
+		os.Exit(0)
+	}
+
+	// Handle 'termchat login' / 'termchat auth login'
+	if len(os.Args) > 1 && (os.Args[1] == "login" || (os.Args[1] == "auth" && len(os.Args) > 2 && os.Args[2] == "login")) {
+		fmt.Println("◆ GITHUB DEVICE AUTHORIZATION")
+		client := &ghauth.Client{}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+		defer cancel()
+
+		user, err := client.Login(ctx, func(dc *ghauth.DeviceCodeResponse) {
+			fmt.Printf("\n  1. First copy your one-time code: \033[1;32m%s\033[0m\n", dc.UserCode)
+			fmt.Printf("  2. Open: \033[1;34m%s\033[0m\n\n", dc.VerificationURI)
+			fmt.Println("Waiting for browser authorization...")
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "\n[ERR] GitHub authentication failed: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("\n✓ Successfully authenticated as @%s!\nCredentials saved to ~/.config/termchat/hosts.json (0600)\n", user.Login)
+		os.Exit(0)
+	}
+
+	// Handle 'termchat logout' / 'termchat auth logout'
+	if len(os.Args) > 1 && (os.Args[1] == "logout" || (os.Args[1] == "auth" && len(os.Args) > 2 && os.Args[2] == "logout")) {
+		if err := ghauth.ClearToken(); err != nil {
+			fmt.Fprintf(os.Stderr, "[ERR] Failed to log out: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("✓ Logged out of TermChat GitHub session.")
+		os.Exit(0)
+	}
+
+	// Handle 'termchat whoami' / 'termchat auth status'
+	if len(os.Args) > 1 && (os.Args[1] == "whoami" || (os.Args[1] == "auth" && len(os.Args) > 2 && os.Args[2] == "status")) {
+		res, err := ghauth.GetToken()
+		if err != nil {
+			fmt.Println("Not logged in to GitHub. (Run 'termchat login' to authenticate)")
+			os.Exit(0)
+		}
+		client := &ghauth.Client{}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		u, err := client.FetchUser(ctx, res.Token)
+		if err != nil {
+			fmt.Printf("✓ Token present (source: %s), but failed to fetch profile: %v\n", res.Source, err)
+			os.Exit(1)
+		}
+		fmt.Printf("✓ Logged in to github.com as @%s (via %s)\n", u.Login, res.Source)
+		if u.Name != "" {
+			fmt.Printf("  • Name:   %s\n", u.Name)
+		}
+		if u.Email != "" {
+			fmt.Printf("  • Email:  %s\n", u.Email)
+		}
 		os.Exit(0)
 	}
 
@@ -165,6 +222,18 @@ func main() {
 
 	cfg := system.LoadConfig()
 	name := *nameFlag
+	if name == "" {
+		if authUser, _ := ghauth.GetAuthenticatedUser(); authUser != "" {
+			name = authUser
+		} else if res, err := ghauth.GetToken(); err == nil && res.Token != "" {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			client := &ghauth.Client{}
+			if u, err := client.FetchUser(ctx, res.Token); err == nil && u.Login != "" {
+				name = u.Login
+			}
+			cancel()
+		}
+	}
 	if name == "" {
 		if cfg.Nickname != "" {
 			name = cfg.Nickname

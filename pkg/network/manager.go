@@ -410,7 +410,7 @@ func (m *Manager) handlePacket(p *PeerConnection, pkt *Packet) {
 	if pkt.Type == MsgTypeEncrypted {
 		if m.EncryptionKey == nil {
 			if m.events.OnSystemMsg != nil {
-				m.events.OnSystemMsg("[AES-256] Received encrypted packet but no passphrase is set. Use `/auth <passphrase>`")
+				m.events.OnSystemMsg("[AES-256] Received encrypted packet but no passphrase is set. Use `/pass <passphrase>`")
 			}
 			return
 		}

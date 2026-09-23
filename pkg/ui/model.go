@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
 	"hash/fnv"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"termchat/pkg/ghauth"
 	"termchat/pkg/ghbridge"
 	"termchat/pkg/gitcollab"
 	"termchat/pkg/network"
@@ -975,7 +977,7 @@ func (m *Model) handleTabComplete() {
 			"/clip", "/sidebar", "/clear", "/nick", "/create", "/join", "/leave", "/room", "/init", "/repo", "/update",
 			"/diff", "/patch", "/apply", "/branch", "/branches", "/checkout", "/switch",
 			"/pr", "/issue", "/ci", "/editor", "/compose",
-			"/identity", "/whoami", "/invite", "/kick", "/ban", "/unban", "/banlist",
+			"/identity", "/whoami", "/login", "/logout", "/auth", "/pass", "/invite", "/kick", "/ban", "/unban", "/banlist",
 			"/expire", "/destroy", "/nuke", "/autodelete",
 			"/help", "/qr", "/send", "/dir", "/connect",
 		}
@@ -1477,7 +1479,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			}
 		}()
 
-	case "/auth", "/pass":
+	case "/pass", "/passwd", "/key":
 		if len(parts) < 2 {
 			m.manager.SetEncryptionPassphrase("")
 			m.addSystemMsg("[UNLOCKED] Encryption disabled (plain LAN mode)")
@@ -2151,16 +2153,52 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			}()
 		}
 
+	case "/login", "/auth":
+		go func() {
+			m.addSystemMsg("◆ GITHUB DEVICE AUTHENTICATION\nRequesting device authorization code from GitHub...")
+			client := &ghauth.Client{}
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+			defer cancel()
+
+			user, err := client.Login(ctx, func(dc *ghauth.DeviceCodeResponse) {
+				m.addSystemMsg(fmt.Sprintf("◆ GITHUB DEVICE AUTHENTICATION\n• 1. Copy your one-time code: `%s`\n• 2. Open: %s\nWaiting for browser authorization...", dc.UserCode, dc.VerificationURI))
+			})
+			if err != nil {
+				m.addSystemMsg(fmt.Sprintf("[ERR] GitHub authentication failed: %v", err))
+				return
+			}
+			m.manager.SetName(user.Login)
+			m.addSystemMsg(fmt.Sprintf("✓ Successfully authenticated as @%s!\nCredentials saved to ~/.config/termchat/hosts.json (0600)", user.Login))
+		}()
+
+	case "/logout":
+		if err := ghauth.ClearToken(); err != nil {
+			m.addSystemMsg(fmt.Sprintf("[ERR] Failed to log out: %v", err))
+		} else {
+			m.addSystemMsg("✓ Logged out of TermChat GitHub session.")
+		}
+
 	case "/identity", "/whoami", "/id":
+		ghInfo := "Not logged in to GitHub (anonymous/guest mode)."
+		if res, err := ghauth.GetToken(); err == nil && res.Token != "" {
+			ghInfo = fmt.Sprintf("Authenticated on github.com (via %s)", res.Source)
+			client := &ghauth.Client{}
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			if u, err := client.FetchUser(ctx, res.Token); err == nil && u.Login != "" {
+				ghInfo = fmt.Sprintf("Authenticated on github.com as @%s ✓ (via %s)", u.Login, res.Source)
+			}
+			cancel()
+		}
+
 		if m.manager.Identity != nil {
 			fp := m.manager.Identity.Fingerprint()
 			pk := m.manager.Identity.FullPublicKeyHex()
 			if len(pk) > 20 {
 				pk = pk[:10] + "..." + pk[len(pk)-10:]
 			}
-			m.addSystemMsg(fmt.Sprintf("**[DEVICE IDENTITY]**\n• **Nickname:** %s\n• **Ed25519 Fingerprint:** `ed25519:%s`\n• **Public Key:** `%s`", m.manager.LocalName, fp, pk))
+			m.addSystemMsg(fmt.Sprintf("**[IDENTITY & AUTH]**\n• **Chat Nickname:** %s\n• **GitHub Identity:** %s\n• **Ed25519 Fingerprint:** `ed25519:%s`\n• **Public Key:** `%s`", m.manager.LocalName, ghInfo, fp, pk))
 		} else {
-			m.addSystemMsg(fmt.Sprintf("User: %s (ID: %s)", m.manager.LocalName, m.manager.LocalID))
+			m.addSystemMsg(fmt.Sprintf("User: %s (ID: %s)\n• GitHub: %s", m.manager.LocalName, m.manager.LocalID, ghInfo))
 		}
 
 	case "/invite", "/link":

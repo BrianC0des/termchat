@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"termchat/pkg/ghauth"
 	"termchat/pkg/network"
 	"termchat/pkg/system"
 
@@ -329,9 +330,14 @@ func (m *Model) renderSidebar(peers []network.PeerConnection, width int) string 
 				statusStr = statusStr[:maxStatusLen-2] + ".."
 			}
 		}
-		sb.WriteString(fmt.Sprintf("%s %s %s%s\n",
+		authBadge := ""
+		if res, err := ghauth.GetToken(); err == nil && res.Token != "" {
+			authBadge = " " + lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render("✓")
+		}
+		sb.WriteString(fmt.Sprintf("%s %s%s %s%s\n",
 			lipgloss.NewStyle().Foreground(SecondaryColor).Render("●"),
 			MessageText.Render(myName),
+			authBadge,
 			lipgloss.NewStyle().Foreground(MutedColor).Render("(you)"),
 			lipgloss.NewStyle().Foreground(PrimaryColor).Render(statusStr),
 		))
