@@ -89,3 +89,17 @@ func TestFormatIssueList(t *testing.T) {
 		t.Errorf("expected formatted row for issue 20, got: %s", out)
 	}
 }
+
+func TestRunGHCapturesStderr(t *testing.T) {
+	_, err := runGH("issue", "list", "--this-flag-does-not-exist")
+	if err == nil {
+		t.Fatal("expected error for invalid flag")
+	}
+	if strings.Contains(err.Error(), "exit status 1") {
+		t.Errorf("expected error to contain actual stderr message, but got bare: %v", err)
+	}
+	if !strings.Contains(err.Error(), "unknown flag") {
+		t.Errorf("expected error to mention 'unknown flag', got: %v", err)
+	}
+}
+

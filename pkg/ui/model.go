@@ -2170,15 +2170,27 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			return
 		}
 
-		prNum, err := strconv.Atoi(strings.TrimPrefix(parts[1], "#"))
-		if err != nil {
-			m.addSystemMsg("Usage: /pr <number>")
+		repo := m.getActiveRepo()
+		argOffset := 1
+		if len(parts) > 2 && strings.Contains(parts[1], "/") {
+			repo = parts[1]
+			argOffset = 2
+		}
+
+		if len(parts) <= argOffset {
+			m.addSystemMsg("Usage: /pr <number> or /pr <owner/repo> <number>")
 			return
 		}
 
-		repo := ""
-		if wsCfg, _, err := workspace.FindWorkspace(""); err == nil && wsCfg.Repo != "" {
-			repo = wsCfg.Repo
+		prNum, err := strconv.Atoi(strings.TrimPrefix(parts[argOffset], "#"))
+		if err != nil {
+			m.addSystemMsg("Usage: /pr <number> or /pr <owner/repo> <number>")
+			return
+		}
+
+		if repo == "" {
+			m.addSystemMsg("[GH] No GitHub repository detected.\n• Run termchat inside a git repo, switch with `/cd <path>`, or init with `/init`\n• Or specify the repo directly: `/pr <owner/repo> <number>`")
+			return
 		}
 
 		pr, err := ghbridge.FetchPR(repo, prNum)
@@ -2208,18 +2220,33 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		m.viewport.GotoBottom()
 
 	case "/issue", "/issues":
-		repo := ""
-		if wsCfg, _, err := workspace.FindWorkspace(""); err == nil && wsCfg.Repo != "" {
-			repo = wsCfg.Repo
+		repo := m.getActiveRepo()
+
+		isList := len(parts) < 2 || parts[1] == "list" || parts[1] == "ls" || command == "/issues"
+		argOffset := 1
+		if len(parts) > 1 && strings.Contains(parts[1], "/") {
+			repo = parts[1]
+			argOffset = 2
 		}
 
-		if len(parts) < 2 || parts[1] == "list" || parts[1] == "ls" || command == "/issues" {
+		if isList {
 			state := "open"
-			if len(parts) > 2 && (parts[2] == "closed" || parts[2] == "all") {
-				state = parts[2]
-			} else if len(parts) == 2 && (parts[1] == "closed" || parts[1] == "all") {
-				state = parts[1]
+			if len(parts) > argOffset {
+				val := strings.ToLower(parts[argOffset])
+				if val == "closed" || val == "all" || val == "open" {
+					state = val
+				} else if val == "list" || val == "ls" {
+					if len(parts) > argOffset+1 {
+						state = strings.ToLower(parts[argOffset+1])
+					}
+				}
 			}
+
+			if repo == "" {
+				m.addSystemMsg("[GH] No GitHub repository detected.\n• Run termchat inside a git repo, switch with `/cd <path>`, or init with `/init`\n• Or specify the repo directly: `/issues <owner/repo> [open|closed]`")
+				return
+			}
+
 			issues, err := ghbridge.FetchIssueList(repo, state, 15)
 			if err != nil {
 				m.addSystemMsg(fmt.Sprintf("[GH] %v", err))
@@ -2230,9 +2257,19 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			return
 		}
 
-		issueNum, err := strconv.Atoi(strings.TrimPrefix(parts[1], "#"))
+		if len(parts) <= argOffset {
+			m.addSystemMsg("Usage: /issue <number> (or /issues to list, or /issue <owner/repo> <number>)")
+			return
+		}
+
+		issueNum, err := strconv.Atoi(strings.TrimPrefix(parts[argOffset], "#"))
 		if err != nil {
-			m.addSystemMsg("Usage: /issue <number> (or /issues to list)")
+			m.addSystemMsg("Usage: /issue <number> (or /issues to list, or /issue <owner/repo> <number>)")
+			return
+		}
+
+		if repo == "" {
+			m.addSystemMsg("[GH] No GitHub repository detected.\n• Run termchat inside a git repo, switch with `/cd <path>`, or init with `/init`\n• Or specify the repo directly: `/issue <owner/repo> <number>`")
 			return
 		}
 
@@ -2263,13 +2300,14 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		m.viewport.GotoBottom()
 
 	case "/ci":
-		repo := ""
-		if wsCfg, _, err := workspace.FindWorkspace(""); err == nil && wsCfg.Repo != "" {
-			repo = wsCfg.Repo
-		}
+		repo := m.getActiveRepo()
 		branch := ""
 		if out, err := exec.Command("git", "branch", "--show-current").Output(); err == nil {
 			branch = strings.TrimSpace(string(out))
+		}
+		if repo == "" {
+			m.addSystemMsg("[CI] No GitHub repository detected. Run inside a git repo or switch with `/cd <path>`.")
+			return
 		}
 
 		status, err := ghbridge.FetchCIStatus(repo, branch)
@@ -2871,6 +2909,16 @@ func (m *Model) showRecentRepos() {
 	}
 	sb.WriteString("\n  ↳ Switch anytime with `/cd <number>` (e.g. `/cd 1`) or `/cd <path>`")
 	m.addSystemMsg(sb.String())
+}
+
+func (m *Model) getActiveRepo() string {
+	if wsCfg, _, err := workspace.FindWorkspace(""); err == nil && wsCfg.Repo != "" {
+		return wsCfg.Repo
+	}
+	if repo, err := workspace.DetectGitRepo("."); err == nil && repo != "" {
+		return repo
+	}
+	return ""
 }
 
 func (m *Model) toggleSidebar() (tea.Model, tea.Cmd) {

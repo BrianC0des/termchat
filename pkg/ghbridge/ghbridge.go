@@ -1,12 +1,29 @@
 package ghbridge
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
 )
+
+// runGH executes a GitHub CLI command and captures stderr on failure
+func runGH(args ...string) ([]byte, error) {
+	var stderr bytes.Buffer
+	cmd := exec.Command("gh", args...)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		errStr := strings.TrimSpace(stderr.String())
+		if errStr != "" {
+			return nil, fmt.Errorf("%s", errStr)
+		}
+		return nil, err
+	}
+	return out, nil
+}
 
 // PRDetails holds key pull request metadata
 type PRDetails struct {
@@ -42,8 +59,7 @@ func FetchPR(repo string, prNum int) (*PRDetails, error) {
 		args = append(args, "-R", repo)
 	}
 
-	cmd := exec.Command("gh", args...)
-	out, err := cmd.Output()
+	out, err := runGH(args...)
 	if err != nil {
 		return nil, fmt.Errorf("could not fetch PR #%d: %v", prNum, err)
 	}
@@ -99,8 +115,7 @@ func FetchIssue(repo string, issueNum int) (*IssueDetails, error) {
 		args = append(args, "-R", repo)
 	}
 
-	cmd := exec.Command("gh", args...)
-	out, err := cmd.Output()
+	out, err := runGH(args...)
 	if err != nil {
 		return nil, fmt.Errorf("could not fetch Issue #%d: %v", issueNum, err)
 	}
@@ -159,8 +174,7 @@ func FetchCIStatus(repo, branch string) (string, error) {
 		args = append(args, "--branch", branch)
 	}
 
-	cmd := exec.Command("gh", args...)
-	out, err := cmd.Output()
+	out, err := runGH(args...)
 	if err != nil {
 		return "", fmt.Errorf("could not fetch CI status: %v", err)
 	}
@@ -215,8 +229,7 @@ func FetchIssueList(repo string, state string, limit int) ([]IssueSummary, error
 		args = append(args, "-R", repo)
 	}
 
-	cmd := exec.Command("gh", args...)
-	out, err := cmd.Output()
+	out, err := runGH(args...)
 	if err != nil {
 		return nil, fmt.Errorf("could not fetch issues: %v", err)
 	}
