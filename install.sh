@@ -119,6 +119,10 @@ fi
 echo -e "${YELLOW}Fetching latest release info...${RESET}"
 TAG=""
 if command -v curl >/dev/null 2>&1; then
+    TAG=$(curl -sSL --max-time 4 "https://pub-dedfad7b41964c1db562228d4b8bde8a.r2.dev/version.json" | grep '"version":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+fi
+
+if [ -z "${TAG}" ] && command -v curl >/dev/null 2>&1; then
     TAG=$(curl -sSL --max-time 4 "https://raw.githubusercontent.com/${REPO}/main/version.json" | grep '"version":' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
 fi
 
@@ -131,7 +135,7 @@ if [ -z "${TAG}" ] && command -v curl >/dev/null 2>&1; then
 fi
 
 if [ -z "${TAG}" ] || [ "${TAG}" = "null" ] || [ "${TAG}" = "https://github.com/${REPO}/releases" ]; then
-    TAG="v2.1.0"
+    TAG="v2.1.2"
 fi
 echo -e "${GREEN}Using release version: ${TAG}${RESET}"
 
@@ -144,6 +148,10 @@ if [ "${TARGET_OS}" = "android" ]; then
 fi
 
 # 4. Mirror URLs
+R2_BASE="https://pub-dedfad7b41964c1db562228d4b8bde8a.r2.dev"
+URL_R2_LATEST="${R2_BASE}/latest/${ASSET_NAME}"
+URL_R2_ROOT="${R2_BASE}/${ASSET_NAME}"
+URL_R2_TAG="${R2_BASE}/${TAG}/${ASSET_NAME}"
 URL_GITHUB="https://github.com/${REPO}/releases/download/${TAG}/${ASSET_NAME}"
 URL_JSDELIVR="https://cdn.jsdelivr.net/gh/${REPO}@binaries/${ASSET_NAME}"
 URL_FASTLY="https://fastly.jsdelivr.net/gh/${REPO}@binaries/${ASSET_NAME}"
@@ -160,7 +168,7 @@ trap cleanup EXIT
 echo -e "${YELLOW}Downloading ${ASSET_NAME}...${RESET}"
 DOWNLOAD_SUCCESS=0
 
-for URL in "${URL_GITHUB}" "${URL_JSDELIVR}" "${URL_FASTLY}" "${URL_RAW}"; do
+for URL in "${URL_R2_LATEST}" "${URL_R2_ROOT}" "${URL_R2_TAG}" "${URL_GITHUB}" "${URL_JSDELIVR}" "${URL_FASTLY}" "${URL_RAW}"; do
     echo -e "  Trying: ${BLUE}${URL}${RESET}"
     if curl -fL --progress-bar --connect-timeout 15 --max-time 300 --retry 3 --retry-delay 2 -C - -o "${TMP_DIR}/${ASSET_NAME}" "${URL}"; then
         if [ -s "${TMP_DIR}/${ASSET_NAME}" ] && [ $(wc -c < "${TMP_DIR}/${ASSET_NAME}") -gt 100000 ]; then

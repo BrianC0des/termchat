@@ -21,7 +21,10 @@ import (
 	"time"
 )
 
-const AppVersion = "v2.1.2"
+const (
+	AppVersion      = "v2.1.2"
+	CloudflareR2URL = "https://pub-dedfad7b41964c1db562228d4b8bde8a.r2.dev"
+)
 
 var (
 	preFetchMu       sync.RWMutex
@@ -216,6 +219,25 @@ func getPlatformArchiveName() string {
 func FetchLatestVersionTag() (string, error) {
 	client := createOptimizedHTTPClient(false)
 	client.Timeout = 5 * time.Second
+
+	// Tier 0: Cloudflare R2 Global Edge (Instant, Zero Rate Limits, No Cache Lag)
+	r2Req, r2Err := http.NewRequest("GET", CloudflareR2URL+"/version.json", nil)
+	if r2Err == nil {
+		r2Req.Header.Set("User-Agent", "TermChat-Updater/2.1")
+		resp, rErr := client.Do(r2Req)
+		if rErr == nil && resp.StatusCode == http.StatusOK {
+			defer resp.Body.Close()
+			var vInfo struct {
+				Version string `json:"version"`
+			}
+			if json.NewDecoder(resp.Body).Decode(&vInfo) == nil && vInfo.Version != "" {
+				return vInfo.Version, nil
+			}
+		}
+		if resp != nil {
+			resp.Body.Close()
+		}
+	}
 
 	// Tier 1: Fastly CDN Edge (Instant, Zero Rate Limits)
 	cdnURLs := []string{
@@ -515,7 +537,15 @@ func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 		archiveName := getPlatformArchiveName()
 
 		urls := []string{
-			// Tier 0: Hugging Face Cloudflare Enterprise Global Edge CDN (Manila / Singapore Edge nodes, 80+ MB/s)
+			// Tier 0: Cloudflare R2 Global Edge CDN (330+ locations, Zero rate limits, Native HTTP Range chunks)
+			fmt.Sprintf("%s/latest/%s", CloudflareR2URL, archiveName),
+			fmt.Sprintf("%s/%s", CloudflareR2URL, archiveName),
+			fmt.Sprintf("%s/latest/%s", CloudflareR2URL, binaryName),
+			fmt.Sprintf("%s/%s", CloudflareR2URL, binaryName),
+			fmt.Sprintf("%s/%s/%s", CloudflareR2URL, latestTag, archiveName),
+			fmt.Sprintf("%s/%s/%s", CloudflareR2URL, latestTag, binaryName),
+
+			// Tier 1: Hugging Face Cloudflare Enterprise Global Edge CDN (Manila / Singapore Edge nodes, 80+ MB/s)
 			fmt.Sprintf("https://huggingface.co/datasets/devchan123/termchat-releases/resolve/main/%s", archiveName),
 			fmt.Sprintf("https://huggingface.co/datasets/devchan123/termchat-releases/resolve/main/%s", binaryName),
 			fmt.Sprintf("https://huggingface.co/datasets/BrianC0des/termchat-releases/resolve/main/%s", archiveName),
@@ -715,6 +745,9 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	// Tier -1: Chrome-style Differential Binary Delta Update (<150KB payload)
 	deltaName := fmt.Sprintf("%s-%s-to-%s.delta.zst", binaryName, AppVersion, latestTag)
 	deltaURLs := []string{
+		// Cloudflare R2 Global Edge
+		fmt.Sprintf("%s/deltas/%s", CloudflareR2URL, deltaName),
+		fmt.Sprintf("%s/%s", CloudflareR2URL, deltaName),
 		fmt.Sprintf("https://huggingface.co/datasets/devchan123/termchat-releases/resolve/main/%s", deltaName),
 		fmt.Sprintf("https://huggingface.co/datasets/BrianC0des/termchat-releases/resolve/main/%s", deltaName),
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, deltaName),
@@ -783,7 +816,15 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	}
 
 	urls := []string{
-		// Tier 0: Hugging Face Cloudflare Enterprise Global Edge CDN (Manila / Singapore Edge nodes, 80+ MB/s)
+		// Tier 0: Cloudflare R2 Global Edge CDN (330+ locations, Zero rate limits, Native HTTP Range chunks)
+		fmt.Sprintf("%s/latest/%s", CloudflareR2URL, archiveName),
+		fmt.Sprintf("%s/%s", CloudflareR2URL, archiveName),
+		fmt.Sprintf("%s/latest/%s", CloudflareR2URL, binaryName),
+		fmt.Sprintf("%s/%s", CloudflareR2URL, binaryName),
+		fmt.Sprintf("%s/%s/%s", CloudflareR2URL, latestTag, archiveName),
+		fmt.Sprintf("%s/%s/%s", CloudflareR2URL, latestTag, binaryName),
+
+		// Tier 1: Hugging Face Cloudflare Enterprise Global Edge CDN (Manila / Singapore Edge nodes, 80+ MB/s)
 		fmt.Sprintf("https://huggingface.co/datasets/devchan123/termchat-releases/resolve/main/%s", archiveName),
 		fmt.Sprintf("https://huggingface.co/datasets/devchan123/termchat-releases/resolve/main/%s", binaryName),
 		fmt.Sprintf("https://huggingface.co/datasets/BrianC0des/termchat-releases/resolve/main/%s", archiveName),

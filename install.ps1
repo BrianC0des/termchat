@@ -19,18 +19,30 @@ Write-Host ""
 
 # 1. Fetch Latest Release Tag
 Write-Host "Fetching latest release version..." -ForegroundColor Yellow
-$Tag = "v1.9.8"
+$Tag = "v2.1.2"
+$R2Base = "https://pub-dedfad7b41964c1db562228d4b8bde8a.r2.dev"
 try {
-    $ReleaseInfo = Invoke-RestMethod -Uri $GitHubLatestApi -Headers @{"User-Agent"="TermChat-Installer"} -TimeoutSec 5
-    if ($ReleaseInfo.tag_name) {
-        $Tag = $ReleaseInfo.tag_name
+    $VersionInfo = Invoke-RestMethod -Uri "$R2Base/version.json" -Headers @{"User-Agent"="TermChat-Installer"} -TimeoutSec 4
+    if ($VersionInfo.version) {
+        $Tag = $VersionInfo.version
         Write-Host "Found latest version: $Tag" -ForegroundColor Green
     }
 } catch {
-    Write-Host "Using release version: $Tag" -ForegroundColor Yellow
+    try {
+        $ReleaseInfo = Invoke-RestMethod -Uri $GitHubLatestApi -Headers @{"User-Agent"="TermChat-Installer"} -TimeoutSec 4
+        if ($ReleaseInfo.tag_name) {
+            $Tag = $ReleaseInfo.tag_name
+            Write-Host "Found latest version: $Tag" -ForegroundColor Green
+        }
+    } catch {
+        Write-Host "Using release version: $Tag" -ForegroundColor Yellow
+    }
 }
 
 # 2. Mirror URLs
+$UrlR2Latest = "$R2Base/latest/$AssetZip"
+$UrlR2Root = "$R2Base/$AssetZip"
+$UrlR2Tag = "$R2Base/$Tag/$AssetZip"
 $UrlGitHub = "https://github.com/$Repo/releases/download/$Tag/$AssetZip"
 $UrlHF = "https://huggingface.co/datasets/BrianC0des/termchat-releases/resolve/main/$AssetZip"
 $UrlFastly = "https://raw.githubusercontent.com/$Repo/binaries/$AssetZip"
@@ -42,7 +54,7 @@ $TempExtract = "$env:TEMP\termchat-extract"
 Write-Host "Downloading $AssetZip..." -ForegroundColor Yellow
 $DownloadSuccess = $false
 
-foreach ($Url in @($UrlGitHub, $UrlHF, $UrlFastly)) {
+foreach ($Url in @($UrlR2Latest, $UrlR2Root, $UrlR2Tag, $UrlGitHub, $UrlHF, $UrlFastly)) {
     try {
         Write-Host "  Trying: $Url" -ForegroundColor Blue
         Invoke-WebRequest -Uri $Url -OutFile $TempZip -UseBasicParsing -TimeoutSec 15

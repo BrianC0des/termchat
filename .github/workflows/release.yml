@@ -115,6 +115,22 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Deploy to Cloudflare R2 Edge CDN
+        if: ${{ env.CLOUDFLARE_API_TOKEN != '' }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          echo "Syncing release to Cloudflare R2 bucket: termchat-releases..."
+          npx wrangler r2 object put termchat-releases/version.json --file version.json --content-type application/json --cache-control "public, max-age=60" --remote
+          for f in dist/*; do
+            fname=$(basename "$f")
+            echo "Uploading $fname to Cloudflare R2..."
+            npx wrangler r2 object put "termchat-releases/$fname" --file "$f" --remote
+            npx wrangler r2 object put "termchat-releases/latest/$fname" --file "$f" --remote
+            npx wrangler r2 object put "termchat-releases/${GITHUB_REF_NAME}/$fname" --file "$f" --remote
+          done
+          echo "Successfully published release to Cloudflare R2!"
+
       - name: Sync to Hugging Face Cloudflare Global CDN
         if: ${{ env.HF_TOKEN != '' }}
         env:
