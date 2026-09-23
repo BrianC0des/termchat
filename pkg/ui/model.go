@@ -2297,7 +2297,14 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			defer cancel()
 
 			user, err := client.Login(ctx, func(dc *ghauth.DeviceCodeResponse) {
-				m.addSystemMsg(fmt.Sprintf("◆ GITHUB DEVICE AUTHENTICATION\n• 1. Copy your one-time code: `%s`\n• 2. Open: %s\nWaiting for browser authorization...", dc.UserCode, dc.VerificationURI))
+				_ = system.WriteClipboard(dc.UserCode)
+				browserErr := system.OpenURL(dc.VerificationURI)
+				browserNote := "Opened in browser"
+				if browserErr != nil {
+					browserNote = fmt.Sprintf("Browser: %v", browserErr)
+				}
+				m.addSystemMsg(fmt.Sprintf("◆ GITHUB DEVICE AUTHENTICATION\n• One-time code: %s  (✓ Copied to clipboard!)\n• Verification:  %s  (%s)\n↳ Simply paste (Ctrl+V) the code into your browser and authorize!\n  (Tip: Hold Shift while dragging mouse to select text in terminal)", dc.UserCode, dc.VerificationURI, browserNote))
+				m.setToast(fmt.Sprintf("Code %s copied to clipboard! Opening browser...", dc.UserCode), 6*time.Second)
 			})
 			if err != nil {
 				m.addSystemMsg(fmt.Sprintf("[ERR] GitHub authentication failed: %v", err))
@@ -2305,6 +2312,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			}
 			m.manager.SetName(user.Login)
 			m.addSystemMsg(fmt.Sprintf("✓ Successfully authenticated as @%s!\nCredentials saved to ~/.config/termchat/hosts.json (0600)", user.Login))
+			m.setToast(fmt.Sprintf("✓ Logged in as @%s", user.Login), 5*time.Second)
 		}()
 
 	case "/logout":

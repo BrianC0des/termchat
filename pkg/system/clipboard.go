@@ -2,6 +2,7 @@ package system
 
 import (
 	"bytes"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"os/exec"
@@ -95,6 +96,10 @@ func ReadClipboard() (string, error) {
 
 // WriteClipboard writes clipboard content across Linux, Wayland, macOS, and Termux
 func WriteClipboard(text string) error {
+	// Always emit ANSI OSC 52 sequence for terminal emulators supporting native clipboard synchronization
+	b64 := base64.StdEncoding.EncodeToString([]byte(text))
+	fmt.Fprintf(os.Stderr, "\x1b]52;c;%s\x07", b64)
+
 	// 1. Termux: use termux-clipboard-set with a strict 3s timeout
 	//    to avoid hanging when Termux:API app is missing
 	if isTermux() {

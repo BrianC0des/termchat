@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"strings"
 )
 
@@ -94,15 +95,28 @@ func TriggerRing() error {
 	return nil
 }
 
-// OpenURL opens a URL in the default browser
+// OpenURL opens a URL in the default browser across Linux, macOS, and Windows
 func OpenURL(url string) error {
-	if isCommandAvailable("termux-open-url") {
-		return exec.Command("termux-open-url", url).Run()
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default: // Linux, WSL, BSD
+		if isCommandAvailable("termux-open-url") {
+			cmd = exec.Command("termux-open-url", url)
+		} else if isCommandAvailable("wslview") {
+			cmd = exec.Command("wslview", url)
+		} else if isCommandAvailable("xdg-open") {
+			cmd = exec.Command("xdg-open", url)
+		} else if isCommandAvailable("gio") {
+			cmd = exec.Command("gio", "open", url)
+		} else {
+			return fmt.Errorf("no browser opener available (install xdg-utils or wslview)")
+		}
 	}
-	if isCommandAvailable("xdg-open") {
-		return exec.Command("xdg-open", url).Run()
-	}
-	return fmt.Errorf("no browser opener available")
+	return cmd.Start()
 }
 
 // MediaControl controls media playback (play-pause, next, previous)

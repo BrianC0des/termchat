@@ -108,9 +108,12 @@ func main() {
 		defer cancel()
 
 		user, err := client.Login(ctx, func(dc *ghauth.DeviceCodeResponse) {
-			fmt.Printf("\n  1. First copy your one-time code: \033[1;32m%s\033[0m\n", dc.UserCode)
-			fmt.Printf("  2. Open: \033[1;34m%s\033[0m\n\n", dc.VerificationURI)
-			fmt.Println("Waiting for browser authorization...")
+			_ = system.WriteClipboard(dc.UserCode)
+			_ = system.OpenURL(dc.VerificationURI)
+			fmt.Printf("\n  1. One-time code: \033[1;32m%s\033[0m  (✓ Copied to clipboard!)\n", dc.UserCode)
+			fmt.Printf("  2. Verification:  \033[1;34m%s\033[0m  (Opening default browser...)\n\n", dc.VerificationURI)
+			fmt.Println("Paste the code (Ctrl+V) in the browser and authorize.")
+			fmt.Println("Waiting for authorization...")
 		})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "\n[ERR] GitHub authentication failed: %v\n", err)
