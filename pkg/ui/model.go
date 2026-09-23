@@ -123,6 +123,13 @@ type Model struct {
 	myDirtyFiles   []string
 	radarConflicts []string
 	radarTickCount int
+
+	// Fix 1: cached GitHub auth — avoid spawning `gh auth token` on every frame
+	isGHAuthed       bool
+	ghAuthLastCheck  time.Time
+
+	// Fix 2: dirty flag — only re-render messages when something actually changed
+	messagesDirty bool
 }
 
 type PeerGitState struct {
@@ -141,6 +148,12 @@ const (
 
 // Custom Tea Messages
 type updateProgressMsg string
+
+// Fix 3: background radar result sent back to the UI goroutine via tea.Cmd
+type localRadarResult struct {
+	branch     string
+	dirty      []string
+}
 
 type conflictRadarMsg struct {
 	senderName string
@@ -376,12 +389,23 @@ func NewModel(mgr *network.Manager) *Model {
 		}
 	}
 
+	// Warm up cached GitHub auth state once at startup (not on every frame)
+	m.refreshGHAuth()
+
 	// Pro Feature: Silent Background Pre-fetching of updates while user chats!
 	system.CheckAndPreFetchUpdateAsync(func(msg string) {
 		m.addSystemMsg(msg)
 	})
 
 	return m
+}
+
+// refreshGHAuth re-checks GitHub authentication and caches the result.
+// Called once at startup, and after /login or /logout. Never called in View().
+func (m *Model) refreshGHAuth() {
+	res, err := ghauth.GetToken()
+	m.isGHAuthed = err == nil && res.Token != ""
+	m.ghAuthLastCheck = time.Now()
 }
 
 func (m *Model) SwitchRoomHistory(roomName string) {
@@ -785,6 +809,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// 2. Check and Purge Expired Disappearing Messages
+		// Fix 2: only re-render when something actually changed
 		if len(m.messages) > 0 {
 			now := time.Now()
 			activeMsgs := make([]ChatMessage, 0, len(m.messages))
@@ -799,16 +824,32 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if changed {
 				m.messages = activeMsgs
 				m.viewport.SetContent(m.renderMessages())
-			} else if m.autoDeleteTTL > 0 || m.hasRoomExpiry {
-				// Refresh countdown timers in view
+			} else if (m.autoDeleteTTL > 0 || m.hasRoomExpiry) && m.messagesDirty {
+				// Only re-render countdowns if something was marked dirty
+				m.messagesDirty = false
 				m.viewport.SetContent(m.renderMessages())
 			}
 		}
 
-		// 3. Periodic Git Conflict Radar scan (every 4 seconds)
+		// 3. Fix 3: run Git Conflict Radar in a background goroutine (every 4s)
+		// so git subprocess never blocks keypress rendering
 		m.radarTickCount++
 		if m.radarTickCount%4 == 0 {
-			m.checkLocalRadar()
+			cmds = append(cmds, func() tea.Msg {
+				branch := gitcollab.GetCurrentBranch("")
+				var dirty []string
+				if branch != "" {
+					dirty, _ = gitcollab.GetDirtyFiles("")
+				}
+				return localRadarResult{branch: branch, dirty: dirty}
+			})
+		}
+
+		// Fix 1: refresh cached GH auth every 60s so it stays accurate without blocking typing
+		if time.Since(m.ghAuthLastCheck) > 60*time.Second {
+			go func() {
+				m.refreshGHAuth()
+			}()
 		}
 
 	case updateProgressMsg:
@@ -827,6 +868,34 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setToast(fmt.Sprintf("▲ CONFLICT RADAR: %d colliding file(s) with @%s!", len(m.radarConflicts), msg.senderName), 6*time.Second)
 		}
 		m.recalculateViewport()
+		return m, nil
+
+	// Fix 3: handle background git scan result without blocking UI
+	case localRadarResult:
+		prevBranch := m.gitBranch
+		prevDirty := len(m.myDirtyFiles)
+		if msg.branch != "" {
+			m.gitBranch = msg.branch
+		}
+		dirty := msg.dirty
+		dirtyChanged := len(dirty) != len(m.myDirtyFiles)
+		if !dirtyChanged {
+			for i := range dirty {
+				if i >= len(m.myDirtyFiles) || dirty[i] != m.myDirtyFiles[i] {
+					dirtyChanged = true
+					break
+				}
+			}
+		}
+		if dirtyChanged || m.gitBranch != prevBranch || len(dirty) != prevDirty {
+			m.myDirtyFiles = dirty
+			_ = m.manager.SendConflictRadar(m.gitBranch, m.myDirtyFiles)
+			prevConflicts := len(m.radarConflicts)
+			m.radarConflicts = m.recomputeRadarConflicts()
+			if len(m.radarConflicts) != prevConflicts {
+				m.recalculateViewport()
+			}
+		}
 		return m, nil
 
 	case incomingMsg:
@@ -866,6 +935,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.viewport.SetContent(m.renderMessages())
 		m.viewport.GotoBottom()
+		if m.autoDeleteTTL > 0 {
+			m.messagesDirty = true // triggers countdown re-render in tick
+		}
 
 	case statusUpdateMsg:
 		if m.userStatuses == nil {
@@ -2351,6 +2423,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			m.manager.SetName(user.Login)
 			m.addSystemMsg(fmt.Sprintf("✓ Successfully authenticated as @%s!\nCredentials saved to ~/.config/termchat/hosts.json (0600)", user.Login))
 			m.setToast(fmt.Sprintf("✓ Logged in as @%s", user.Login), 5*time.Second)
+			m.refreshGHAuth() // update cached badge immediately
 		}()
 
 	case "/logout":
@@ -2358,6 +2431,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			m.addSystemMsg(fmt.Sprintf("[ERR] Failed to log out: %v", err))
 		} else {
 			m.addSystemMsg("✓ Logged out of TermChat GitHub session.")
+			m.refreshGHAuth() // clear cached badge immediately
 		}
 
 	case "/identity", "/whoami", "/id":

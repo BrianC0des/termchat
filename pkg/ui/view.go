@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"termchat/pkg/ghauth"
 	"termchat/pkg/network"
 	"termchat/pkg/system"
 
@@ -337,7 +336,8 @@ func (m *Model) renderSidebar(peers []network.PeerConnection, width int) string 
 			}
 		}
 		authBadge := ""
-		if res, err := ghauth.GetToken(); err == nil && res.Token != "" {
+		// Fix 1: use cached auth state — GetToken() spawns a subprocess, must NOT be in View()
+		if m.isGHAuthed {
 			authBadge = " " + lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render("✓")
 		}
 		sb.WriteString(fmt.Sprintf("%s %s%s %s%s\n",
