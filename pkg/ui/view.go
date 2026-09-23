@@ -109,26 +109,31 @@ func (m *Model) View() string {
 		SubTitleStyle.Render(fmt.Sprintf("@%s", m.manager.LocalName)),
 	)
 
-	headerRight := lipgloss.JoinHorizontal(
-		lipgloss.Center,
-		statusBadge,
-		lockBadge,
-		"  ",
-		HelpKeyStyle.Render("F1"),
-		HelpDescStyle.Render(" Help"),
-		" ",
-		HelpKeyStyle.Render("F2"),
-		HelpDescStyle.Render(" Members"),
-		" ",
-		HelpKeyStyle.Render("F3"),
-		HelpDescStyle.Render(fmt.Sprintf(" View(%s)", m.getSidebarModeLabel())),
-		" ",
-		HelpKeyStyle.Render("^F"),
-		HelpDescStyle.Render(" Vault"),
-		" ",
-		HelpKeyStyle.Render("^O"),
-		HelpDescStyle.Render(" Files"),
-	)
+	var shortcuts []string
+	shortcuts = append(shortcuts, renderHeaderShortcut("F1", "help"))
+	if m.width >= 85 {
+		shortcuts = append(shortcuts, renderHeaderShortcut("F2", "team"))
+	}
+	shortcuts = append(shortcuts, renderHeaderShortcut("F3", "sidebar"))
+	if m.width >= 105 {
+		shortcuts = append(shortcuts, renderHeaderShortcut("^F", "vault"))
+		shortcuts = append(shortcuts, renderHeaderShortcut("^O", "files"))
+	}
+
+	var rightItems []string
+	rightItems = append(rightItems, statusBadge)
+	if lockBadge != "" {
+		rightItems = append(rightItems, lockBadge)
+	}
+	rightItems = append(rightItems, "  ")
+	for i, sc := range shortcuts {
+		if i > 0 {
+			rightItems = append(rightItems, " ")
+		}
+		rightItems = append(rightItems, sc)
+	}
+
+	headerRight := lipgloss.JoinHorizontal(lipgloss.Center, rightItems...)
 
 	gap := m.width - lipgloss.Width(headerLeft) - lipgloss.Width(headerRight) - 2
 	if gap < 1 {
@@ -438,80 +443,97 @@ func (m *Model) renderSidebar(peers []network.PeerConnection, width int) string 
 	return sb.String()
 }
 
+func renderHeaderShortcut(key, label string) string {
+	k := lipgloss.NewStyle().
+		Foreground(PrimaryColor).
+		Background(lipgloss.Color("#21262D")).
+		Bold(true).
+		Padding(0, 1).
+		Render(key)
+	l := lipgloss.NewStyle().
+		Foreground(MutedColor).
+		Render(" " + label)
+	return lipgloss.JoinHorizontal(lipgloss.Center, k, l)
+}
+
+func formatHelpRow(cmd, desc string) string {
+	k := lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).Width(17).Render(cmd)
+	d := lipgloss.NewStyle().Foreground(lipgloss.Color("#C9D1D9")).Render(desc)
+	return fmt.Sprintf("  %s %s", k, d)
+}
+
 func (m *Model) renderHelpView() string {
-	boxWidth := min(m.width-4, 82)
-	boxHeight := min(m.height-2, 32)
+	boxWidth := min(m.width-4, 88)
+	if boxWidth < 50 {
+		boxWidth = 50
+	}
 
 	helpBox := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(PrimaryColor).
 		Padding(1, 2).
-		Width(boxWidth).
-		Height(boxHeight)
+		Width(boxWidth)
 
-	title := TitleStyle.Render("◆ SHORTCUTS & COMMAND REFERENCE")
-	sectionDev := lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render("◆ GIT & DEVELOPER COLLAB")
-	sectionRoom := lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).Render("◆ ROOMS & SECURITY")
-	sectionFiles := lipgloss.NewStyle().Foreground(AccentColor).Bold(true).Render("◆ WORKSPACE & FILES")
+	title := TitleStyle.Render(" ◆ SHORTCUTS & COMMAND REFERENCE ")
+	subTitle := lipgloss.NewStyle().Foreground(MutedColor).Faint(true).Render("  Real-Time Git & GitHub Collaboration Hub")
+	header := lipgloss.JoinHorizontal(lipgloss.Center, title, subTitle)
 
-	content := fmt.Sprintf(`%s
+	secGit := lipgloss.NewStyle().Foreground(PrimaryColor).Bold(true).Render("◆ GIT & WORKSPACE")
+	secGH := lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render("◆ GITHUB & AUTH")
+	secRoom := lipgloss.NewStyle().Foreground(AccentColor).Bold(true).Render("◆ ROOMS & ENCRYPTION")
+	secKeys := lipgloss.NewStyle().Foreground(WarningColor).Bold(true).Render("◆ KEYBOARD SHORTCUTS")
 
-%s
-  %s %s
-  %s %s
-  %s %s
-  %s %s
-  %s %s
-  %s %s
-  %s %s
-  %s %s
+	colLeft := []string{
+		secGit,
+		formatHelpRow("/cd <path|#>", "Switch active repo (/projects)"),
+		formatHelpRow("/radar", "Uncommitted conflict scanner"),
+		formatHelpRow("/diff / /patch", "Broadcast zero-commit Git diff"),
+		formatHelpRow("/apply <id>", "Safely apply patch to workspace"),
+		formatHelpRow("/branch", "Inspect or switch branch (/switch)"),
+		"",
+		secGH,
+		formatHelpRow("/login", "GitHub device flow auth (RFC 8628)"),
+		formatHelpRow("/whoami", "Authenticated account & token tier"),
+		formatHelpRow("/pr <#num>", "Interactive PR card & checkouts"),
+		formatHelpRow("/issues [state]", "Interactive issue list (/issue <#>)"),
+		formatHelpRow("/ci", "GitHub Actions CI/CD live status"),
+	}
 
-%s
-  %s %s
-  %s %s
-  %s %s
-  %s %s
-  %s %s
-  %s %s
+	colRight := []string{
+		secKeys,
+		formatHelpRow("Ctrl+X /editor", "Open $EDITOR (nvim/nano/vim/code)"),
+		formatHelpRow("Shift+Enter", "Insert newline draft (Ctrl+J/N)"),
+		formatHelpRow("F1 / /help", "Toggle this help reference"),
+		formatHelpRow("F2 / Members", "Toggle sidebar team dropdown"),
+		formatHelpRow("F3 / Ctrl+B", "Cycle sidebar width (Norm/Wide/Zen)"),
+		formatHelpRow("Ctrl+O /browse", "Visual file explorer to send files"),
+		formatHelpRow("Ctrl+F /files", "Shared Files Vault modal"),
+		formatHelpRow("Ctrl+E / F4", "Toggle folding on code blocks"),
+		formatHelpRow("Esc", "Dismiss active modals / toasts"),
+		formatHelpRow("Ctrl+C /quit", "Clear draft or exit TermChat"),
+		"",
+		secRoom,
+		formatHelpRow("/create [name]", "Create cloud room with password"),
+		formatHelpRow("/join <name>", "Join cloud room or switch channel"),
+		formatHelpRow("/pass [pw]", "Set AES-256 room encryption key"),
+		formatHelpRow("/init [room]", "Scaffold .termchat/room.json for git"),
+		formatHelpRow("/invite / /qr", "1-click room link & ASCII QR code"),
+		formatHelpRow("/expire /destroy", "Self-destruct timer / instant wipe"),
+	}
 
-%s
-  %s %s
-  %s %s
-  %s %s
-  %s %s
-  %s %s
-  %s %s
+	var bodyContent string
+	if boxWidth >= 80 {
+		halfWidth := (boxWidth - 6) / 2
+		leftStr := lipgloss.NewStyle().Width(halfWidth).Render(strings.Join(colLeft, "\n"))
+		rightStr := lipgloss.NewStyle().Width(halfWidth).Render(strings.Join(colRight, "\n"))
+		bodyContent = lipgloss.JoinHorizontal(lipgloss.Top, leftStr, "  ", rightStr)
+	} else {
+		allLines := append(append(colLeft, ""), colRight...)
+		bodyContent = strings.Join(allLines, "\n")
+	}
 
-  %s`,
-		title,
-		sectionDev,
-		HelpKeyStyle.Render("/radar /conflicts"), HelpDescStyle.Render("Live conflict radar: inspect colliding uncommitted files"),
-		HelpKeyStyle.Render("/diff / /patch   "), HelpDescStyle.Render("Broadcast uncommitted Git diff card (#patch-xxxx)"),
-		HelpKeyStyle.Render("/apply <id>      "), HelpDescStyle.Render("Safely apply patch directly to your local workspace"),
-		HelpKeyStyle.Render("/branch /checkout"), HelpDescStyle.Render("Inspect current git branch or switch branches (/switch)"),
-		HelpKeyStyle.Render("/pr / /issues / /ci"), HelpDescStyle.Render("GitHub PR cards, issue previews (/issues) & CI status"),
-		HelpKeyStyle.Render("Ctrl+X / /editor "), HelpDescStyle.Render("Open $EDITOR (nvim/nano/vim) to compose code/notes"),
-		HelpKeyStyle.Render("Shift/Alt+Enter   "), HelpDescStyle.Render("Insert newline / multiline draft (or Ctrl+J / Ctrl+N)"),
-		HelpKeyStyle.Render("Ctrl+E / F4      "), HelpDescStyle.Render("Toggle Discord-style folding on code blocks"),
-
-		sectionRoom,
-		HelpKeyStyle.Render("/create [name] [pw]"), HelpDescStyle.Render("Create new cloud room with optional AES-256 password"),
-		HelpKeyStyle.Render("/join <name> [pw]  "), HelpDescStyle.Render("Join existing room or switch channels (/leave)"),
-		HelpKeyStyle.Render("/init [room]       "), HelpDescStyle.Render("Scaffold .termchat/room.json for team auto-join on clone"),
-		HelpKeyStyle.Render("/invite / /qr      "), HelpDescStyle.Render("Generate 1-click room invite link & ASCII QR code"),
-		HelpKeyStyle.Render("/destroy <code>    "), HelpDescStyle.Render("Room creator instant self-destruct: zero RAM & wipe"),
-		HelpKeyStyle.Render("/expire /autodel   "), HelpDescStyle.Render("Room self-destruct countdown / disappearing messages"),
-
-		sectionFiles,
-		HelpKeyStyle.Render("Ctrl+O / /browse "), HelpDescStyle.Render("Interactive visual file explorer to send files"),
-		HelpKeyStyle.Render("Ctrl+F / /files  "), HelpDescStyle.Render("Open Shared Files Vault modal with custom icons"),
-		HelpKeyStyle.Render("/get <id|#|name> "), HelpDescStyle.Render("1-command download shared room file or URL"),
-		HelpKeyStyle.Render("F2 / F3 (Ctrl+B) "), HelpDescStyle.Render("Toggle members dropdown / sidebar width mode"),
-		HelpKeyStyle.Render("/theme <name>    "), HelpDescStyle.Render("Switch UI theme (github, catppuccin, dracula, nord)"),
-		HelpKeyStyle.Render("/clear / /quit   "), HelpDescStyle.Render("Clear chat buffer / Quit TermChat (Ctrl+C)"),
-
-		lipgloss.NewStyle().Foreground(SecondaryColor).Render("Press ESC, F1, or Enter to return to chat..."),
-	)
+	footer := lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render("Press ESC, F1, or Enter to return to chat...")
+	content := fmt.Sprintf("%s\n\n%s\n\n%s", header, bodyContent, footer)
 
 	return lipgloss.Place(
 		m.width,
