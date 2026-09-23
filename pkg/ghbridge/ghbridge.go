@@ -192,11 +192,103 @@ func FetchCIStatus(repo, branch string) (string, error) {
 		icon, r.Name, r.HeadBranch, statusStr, r.Conclusion, r.Name, r.URL), nil
 }
 
-// FormatIssueCard formats an Issue into a clean, foldable card
+// IssueSummary holds brief issue metadata for lists
+type IssueSummary struct {
+	Number int      `json:"number"`
+	Title  string   `json:"title"`
+	State  string   `json:"state"`
+	Author string   `json:"author"`
+	Labels []string `json:"labels"`
+	URL    string   `json:"url"`
+}
+
+// FetchIssueList queries GitHub CLI for recent issues
+func FetchIssueList(repo string, state string, limit int) ([]IssueSummary, error) {
+	if limit <= 0 {
+		limit = 15
+	}
+	if state == "" {
+		state = "open"
+	}
+	args := []string{"issue", "list", "--limit", strconv.Itoa(limit), "--state", state, "--json", "number,title,state,author,labels,url"}
+	if repo != "" {
+		args = append(args, "-R", repo)
+	}
+
+	cmd := exec.Command("gh", args...)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("could not fetch issues: %v", err)
+	}
+
+	var raw []struct {
+		Number int    `json:"number"`
+		Title  string `json:"title"`
+		State  string `json:"state"`
+		Author struct {
+			Login string `json:"login"`
+		} `json:"author"`
+		Labels []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+		URL string `json:"url"`
+	}
+
+	if err := json.Unmarshal(out, &raw); err != nil {
+		return nil, err
+	}
+
+	var results []IssueSummary
+	for _, item := range raw {
+		var labels []string
+		for _, l := range item.Labels {
+			labels = append(labels, l.Name)
+		}
+		results = append(results, IssueSummary{
+			Number: item.Number,
+			Title:  item.Title,
+			State:  item.State,
+			Author: item.Author.Login,
+			Labels: labels,
+			URL:    item.URL,
+		})
+	}
+	return results, nil
+}
+
+// FormatIssueList formats a list of issues into a clean, Primer Dark table
+func FormatIssueList(issues []IssueSummary, repo string) string {
+	var sb strings.Builder
+	repoLabel := "Current Repository"
+	if repo != "" {
+		repoLabel = repo
+	}
+	sb.WriteString(fmt.Sprintf("◆ GITHUB ISSUES (%s)\n", repoLabel))
+	if len(issues) == 0 {
+		sb.WriteString("  (No issues found matching criteria)\n")
+		return sb.String()
+	}
+
+	for _, iss := range issues {
+		status := "●"
+		if strings.ToUpper(iss.State) == "CLOSED" {
+			status = "✓"
+		}
+		labelsStr := ""
+		if len(iss.Labels) > 0 {
+			labelsStr = fmt.Sprintf(" [%s]", strings.Join(iss.Labels, ", "))
+		}
+		sb.WriteString(fmt.Sprintf("  • #%-3d %s %s (@%s)%s\n", iss.Number, status, iss.Title, iss.Author, labelsStr))
+	}
+	sb.WriteString("\n  ↳ Type /issue <#id> to preview an issue card in chat")
+	return sb.String()
+}
+
+// FormatIssueCard formats an Issue into a clean Primer Dark card
 func FormatIssueCard(iss *IssueDetails) string {
-	stateIcon := "⊙ OPEN"
+	stateBadge := "● OPEN"
 	if strings.ToUpper(iss.State) == "CLOSED" {
-		stateIcon = "⊘ CLOSED"
+		stateBadge = "✓ CLOSED"
 	}
 
 	labelsStr := ""
@@ -207,19 +299,21 @@ func FormatIssueCard(iss *IssueDetails) string {
 	bodyContent := strings.TrimSpace(iss.Body)
 	if bodyContent == "" {
 		bodyContent = "(No description provided)"
+	} else if len(bodyContent) > 360 {
+		bodyContent = bodyContent[:350] + "...\n↳ (Full description at " + iss.URL + ")"
 	}
 
-	return fmt.Sprintf("```github-issue\n⊙ ISSUE #%d — %s\n• Status: %s • Author: @%s%s\n• URL: %s\n──────────────────────────────────────────────────────────\n%s\n```",
-		iss.Number, iss.Title, stateIcon, iss.Author, labelsStr, iss.URL, bodyContent)
+	return fmt.Sprintf("╭── ◆ GITHUB ISSUE #%d ───────────────────────────────────╮\n│ Title:   %s\n│ State:   %s • Author: @%s%s\n│ URL:     %s\n├────────────────────────────────────────────────────────────┤\n%s\n╰────────────────────────────────────────────────────────────╯",
+		iss.Number, iss.Title, stateBadge, iss.Author, labelsStr, iss.URL, bodyContent)
 }
 
-// FormatPRCard formats a PR into a clean, foldable card
+// FormatPRCard formats a PR into a clean Primer Dark card
 func FormatPRCard(pr *PRDetails) string {
-	stateIcon := "⌁ OPEN"
+	stateBadge := "● OPEN"
 	if strings.ToUpper(pr.State) == "MERGED" {
-		stateIcon = "✓ MERGED"
+		stateBadge = "✓ MERGED"
 	} else if strings.ToUpper(pr.State) == "CLOSED" {
-		stateIcon = "✗ CLOSED"
+		stateBadge = "✗ CLOSED"
 	}
 
 	reviewStr := ""
@@ -230,8 +324,10 @@ func FormatPRCard(pr *PRDetails) string {
 	bodyContent := strings.TrimSpace(pr.Body)
 	if bodyContent == "" {
 		bodyContent = "(No description provided)"
+	} else if len(bodyContent) > 360 {
+		bodyContent = bodyContent[:350] + "...\n↳ (Full description at " + pr.URL + ")"
 	}
 
-	return fmt.Sprintf("```github-pr\n⌁ PR #%d — %s\n• Status: %s%s • Author: @%s\n• ⎇ %s → %s (+%d/-%d)\n• URL: %s\n──────────────────────────────────────────────────────────\n%s\n```",
-		pr.Number, pr.Title, stateIcon, reviewStr, pr.Author, pr.HeadRefName, pr.BaseRefName, pr.Additions, pr.Deletions, pr.URL, bodyContent)
+	return fmt.Sprintf("╭── ◆ GITHUB PR #%d ──────────────────────────────────────╮\n│ Title:   %s\n│ State:   %s%s • Author: @%s\n│ Branch:  ⎇ %s → %s (+%d/-%d)\n│ URL:     %s\n├────────────────────────────────────────────────────────────┤\n%s\n╰────────────────────────────────────────────────────────────╯",
+		pr.Number, pr.Title, stateBadge, reviewStr, pr.Author, pr.HeadRefName, pr.BaseRefName, pr.Additions, pr.Deletions, pr.URL, bodyContent)
 }

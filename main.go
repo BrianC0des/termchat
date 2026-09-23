@@ -47,7 +47,30 @@ func main() {
 	vFlag := flag.Bool("v", false, "Show TermChat version")
 	initFlag := flag.Bool("init", false, "Initialize a .termchat/room.json project collab room in the current directory")
 	lanFlag := flag.Bool("lan", false, "Initialize or connect in offline Local LAN mode")
+	dirCFlag := flag.String("C", "", "Run as if termchat was started in <path>")
+	repoDirFlag := flag.String("repo", "", "Run as if termchat was started in <path>")
 	flag.Parse()
+
+	targetDir := *dirCFlag
+	if targetDir == "" {
+		targetDir = *repoDirFlag
+	}
+	if targetDir != "" {
+		resolved, err := workspace.ResolvePath(targetDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ERR] Invalid directory %q: %v\n", targetDir, err)
+			os.Exit(1)
+		}
+		if err := os.Chdir(resolved); err != nil {
+			fmt.Fprintf(os.Stderr, "[ERR] Failed to change directory to %q: %v\n", resolved, err)
+			os.Exit(1)
+		}
+		_ = workspace.AddRecentRepo(resolved)
+	} else {
+		if wd, err := os.Getwd(); err == nil && workspace.IsGitRepo(wd) {
+			_ = workspace.AddRecentRepo(wd)
+		}
+	}
 
 	// Fall back to the TERMCHAT_PASS environment variable when -pass is not
 	// given on the command line, so the passphrase does not have to be
@@ -63,8 +86,22 @@ func main() {
 		os.Exit(0)
 	}
 
+	cmdArg := ""
+	subArg := ""
+	if len(flag.Args()) > 0 {
+		cmdArg = flag.Args()[0]
+		if len(flag.Args()) > 1 {
+			subArg = flag.Args()[1]
+		}
+	} else if len(os.Args) > 1 {
+		cmdArg = os.Args[1]
+		if len(os.Args) > 2 {
+			subArg = os.Args[2]
+		}
+	}
+
 	// Handle 'termchat login' / 'termchat auth login'
-	if len(os.Args) > 1 && (os.Args[1] == "login" || (os.Args[1] == "auth" && len(os.Args) > 2 && os.Args[2] == "login")) {
+	if cmdArg == "login" || (cmdArg == "auth" && subArg == "login") {
 		fmt.Println("◆ GITHUB DEVICE AUTHORIZATION")
 		client := &ghauth.Client{}
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
@@ -84,7 +121,7 @@ func main() {
 	}
 
 	// Handle 'termchat logout' / 'termchat auth logout'
-	if len(os.Args) > 1 && (os.Args[1] == "logout" || (os.Args[1] == "auth" && len(os.Args) > 2 && os.Args[2] == "logout")) {
+	if cmdArg == "logout" || (cmdArg == "auth" && subArg == "logout") {
 		if err := ghauth.ClearToken(); err != nil {
 			fmt.Fprintf(os.Stderr, "[ERR] Failed to log out: %v\n", err)
 			os.Exit(1)
@@ -94,7 +131,7 @@ func main() {
 	}
 
 	// Handle 'termchat whoami' / 'termchat auth status'
-	if len(os.Args) > 1 && (os.Args[1] == "whoami" || (os.Args[1] == "auth" && len(os.Args) > 2 && os.Args[2] == "status")) {
+	if cmdArg == "whoami" || (cmdArg == "auth" && subArg == "status") {
 		res, err := ghauth.GetToken()
 		if err != nil {
 			fmt.Println("Not logged in to GitHub. (Run 'termchat login' to authenticate)")

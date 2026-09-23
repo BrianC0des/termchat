@@ -86,4 +86,40 @@ func TestFormatChatMessage_MultilineAlignment(t *testing.T) {
 	}
 }
 
+func TestSplitCommand(t *testing.T) {
+	cases := []struct {
+		input    string
+		expected []string
+	}{
+		{"nano", []string{"nano"}},
+		{"code --wait", []string{"code", "--wait"}},
+		{"omarchy-launch-editor --inline", []string{"omarchy-launch-editor", "--inline"}},
+		{`"my editor" --flag 'single arg'`, []string{"my editor", "--flag", "single arg"}},
+	}
+
+	for _, c := range cases {
+		res := splitCommand(c.input)
+		if len(res) != len(c.expected) {
+			t.Errorf("input %q: expected %v, got %v", c.input, c.expected, res)
+			continue
+		}
+		for i := range res {
+			if res[i] != c.expected[i] {
+				t.Errorf("input %q[%d]: expected %q, got %q", c.input, i, c.expected[i], res[i])
+			}
+		}
+	}
+}
+
+func TestResolveEditor_WithNonExistentBinary(t *testing.T) {
+	t.Setenv("EDITOR", "non-existent-editor-binary-xyz123 --some-flag")
+	bin, _ := resolveEditor()
+	if bin == "non-existent-editor-binary-xyz123" {
+		t.Errorf("resolveEditor should not select a non-existent binary, got: %s", bin)
+	}
+	if bin == "" {
+		t.Errorf("resolveEditor returned empty binary")
+	}
+}
+
 

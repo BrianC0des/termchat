@@ -8,10 +8,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"termchat/pkg/ghauth"
 	"termchat/pkg/ghbridge"
@@ -111,6 +113,7 @@ type Model struct {
 
 	toastMsg     string
 	toastExpires time.Time
+	toastID      int
 
 	destroyCode string
 	destroyRoom string
@@ -151,26 +154,96 @@ type editorFinishedMsg struct {
 	filePath string
 }
 
-func openEditorCmd() tea.Cmd {
-	editor := os.Getenv("EDITOR")
-	if editor == "" {
-		editor = os.Getenv("VISUAL")
+type toastClearMsg struct {
+	id int
+}
+
+// splitCommand splits a command string into arguments, handling single and double quotes.
+func splitCommand(cmd string) []string {
+	var args []string
+	var current strings.Builder
+	inQuotes := false
+	quoteChar := rune(0)
+	escaped := false
+
+	for _, r := range cmd {
+		if escaped {
+			current.WriteRune(r)
+			escaped = false
+			continue
+		}
+		if r == '\\' {
+			escaped = true
+			continue
+		}
+		if inQuotes {
+			if r == quoteChar {
+				inQuotes = false
+			} else {
+				current.WriteRune(r)
+			}
+			continue
+		}
+		if r == '"' || r == '\'' {
+			inQuotes = true
+			quoteChar = r
+			continue
+		}
+		if unicode.IsSpace(r) {
+			if current.Len() > 0 {
+				args = append(args, current.String())
+				current.Reset()
+			}
+			continue
+		}
+		current.WriteRune(r)
 	}
-	if editor == "" {
-		if _, err := exec.LookPath("nvim"); err == nil {
-			editor = "nvim"
-		} else if _, err := exec.LookPath("nano"); err == nil {
-			editor = "nano"
-		} else if _, err := exec.LookPath("vim"); err == nil {
-			editor = "vim"
-		} else if _, err := exec.LookPath("micro"); err == nil {
-			editor = "micro"
-		} else if _, err := exec.LookPath("vi"); err == nil {
-			editor = "vi"
-		} else {
-			editor = "nano"
+	if current.Len() > 0 {
+		args = append(args, current.String())
+	}
+	return args
+}
+
+// resolveEditor determines the best available editor command and arguments across platforms.
+func resolveEditor() (string, []string) {
+	var candidates []string
+	if envEd := os.Getenv("EDITOR"); strings.TrimSpace(envEd) != "" {
+		candidates = append(candidates, envEd)
+	}
+	if envVis := os.Getenv("VISUAL"); strings.TrimSpace(envVis) != "" {
+		candidates = append(candidates, envVis)
+	}
+
+	// Platform-specific fallback editors
+	switch runtime.GOOS {
+	case "windows":
+		candidates = append(candidates, "code.cmd --wait", "notepad.exe")
+	case "darwin":
+		candidates = append(candidates, "nvim", "nano", "vim", "vi")
+	default: // Linux, WSL, BSD
+		candidates = append(candidates, "nvim", "nano", "vim", "micro", "vi")
+	}
+
+	for _, c := range candidates {
+		parts := splitCommand(c)
+		if len(parts) == 0 {
+			continue
+		}
+		bin := parts[0]
+		if _, err := exec.LookPath(bin); err == nil {
+			return bin, parts[1:]
 		}
 	}
+
+	// Ultimate fallback
+	if runtime.GOOS == "windows" {
+		return "notepad.exe", nil
+	}
+	return "nano", nil
+}
+
+func openEditorCmd() tea.Cmd {
+	bin, baseArgs := resolveEditor()
 
 	tmpFile, err := os.CreateTemp("", "termchat-compose-*.md")
 	if err != nil {
@@ -179,7 +252,8 @@ func openEditorCmd() tea.Cmd {
 	tmpPath := tmpFile.Name()
 	tmpFile.Close()
 
-	c := exec.Command(editor, tmpPath)
+	cmdArgs := append(append([]string{}, baseArgs...), tmpPath)
+	c := exec.Command(bin, cmdArgs...)
 	return tea.ExecProcess(c, func(err error) tea.Msg {
 		if err != nil {
 			return editorFinishedMsg{err: err, filePath: tmpPath}
@@ -536,6 +610,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.pastedSnippets = make(map[string]string)
 				return m, nil
 			}
+			if m.showHelp {
+				m.showHelp = false
+				return m, nil
+			}
+			if m.showQR {
+				m.showQR = false
+				return m, nil
+			}
+			if m.showFilesModal {
+				m.showFilesModal = false
+				return m, nil
+			}
+			if m.showMembersDropdown {
+				m.showMembersDropdown = false
+				return m, nil
+			}
+			if m.toastMsg != "" {
+				m.toastMsg = ""
+				m.recalculateViewport()
+				return m, nil
+			}
 
 		case tea.KeyCtrlC:
 			if m.textInput.Value() != "" {
@@ -555,16 +650,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case tea.KeyF3, tea.KeyCtrlB:
-			switch m.sidebarMode {
-			case SidebarNormal:
-				m.sidebarMode = SidebarWide
-			case SidebarWide:
-				m.sidebarMode = SidebarHidden
-			case SidebarHidden:
-				m.sidebarMode = SidebarNormal
-			}
-			m.recalculateViewport()
-			return m, nil
+			return m.toggleSidebar()
 
 		case tea.KeyCtrlE, tea.KeyF4:
 			m.expandCodeBlocks = !m.expandCodeBlocks
@@ -872,6 +958,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case toastClearMsg:
+		if msg.id == m.toastID {
+			m.toastMsg = ""
+			m.recalculateViewport()
+		}
+		return m, nil
+
 	case tea.MouseMsg:
 		switch msg.Type {
 		case tea.MouseWheelUp:
@@ -976,10 +1069,10 @@ func (m *Model) handleTabComplete() {
 			"/pin", "/pins", "/unpin", "/copy", "/files", "/browse",
 			"/clip", "/sidebar", "/clear", "/nick", "/create", "/join", "/leave", "/room", "/init", "/repo", "/update",
 			"/diff", "/patch", "/apply", "/branch", "/branches", "/checkout", "/switch",
-			"/pr", "/issue", "/ci", "/editor", "/compose",
+			"/pr", "/issue", "/issues", "/ci", "/editor", "/compose",
 			"/identity", "/whoami", "/login", "/logout", "/auth", "/pass", "/invite", "/kick", "/ban", "/unban", "/banlist",
 			"/expire", "/destroy", "/nuke", "/autodelete",
-			"/help", "/qr", "/send", "/dir", "/connect",
+			"/help", "/qr", "/send", "/dir", "/connect", "/cd", "/projects",
 		}
 		lowerVal := strings.ToLower(val)
 		for _, cmd := range cmdList {
@@ -991,8 +1084,8 @@ func (m *Model) handleTabComplete() {
 		}
 	}
 
-	// 4. Auto-complete file paths for /send
-	if strings.HasPrefix(val, "/send ") || strings.HasPrefix(val, "/file ") {
+	// 4. Auto-complete file paths for /send, /cd, /repo switch
+	if strings.HasPrefix(val, "/send ") || strings.HasPrefix(val, "/file ") || strings.HasPrefix(val, "/cd ") || strings.HasPrefix(val, "/repo switch ") {
 		parts := strings.Fields(val)
 		prefix := ""
 		if len(parts) > 1 {
@@ -1343,28 +1436,30 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		m.pinnedMsgs = append(m.pinnedMsgs[:idx-1], m.pinnedMsgs[idx:]...)
 	case "/sidebar", "/sb":
 		if len(parts) < 2 {
-			switch m.sidebarMode {
-			case SidebarNormal:
-				m.sidebarMode = SidebarWide
-			case SidebarWide:
-				m.sidebarMode = SidebarHidden
-			case SidebarHidden:
-				m.sidebarMode = SidebarNormal
-			}
-		} else {
-			modeArg := strings.ToLower(parts[1])
-			switch modeArg {
-			case "wide", "expand", "max":
-				m.sidebarMode = SidebarWide
-			case "hide", "hidden", "off", "zen":
-				m.sidebarMode = SidebarHidden
-			case "normal", "show", "on", "default":
-				m.sidebarMode = SidebarNormal
-			default:
-				m.addSystemMsg("Usage: /sidebar [normal | wide | hide | toggle]")
-			}
+			m.toggleSidebar()
+			return
+		}
+		if m.width < 70 {
+			m.setToast("[!] Terminal too narrow for sidebar (< 70 columns)", 3*time.Second)
+			return
+		}
+		modeArg := strings.ToLower(parts[1])
+		switch modeArg {
+		case "wide", "expand", "max":
+			m.sidebarMode = SidebarWide
+			m.setToast("Sidebar: Wide (36 cols)", 2*time.Second)
+		case "hide", "hidden", "off", "zen":
+			m.sidebarMode = SidebarHidden
+			m.setToast("Sidebar: Hidden (Zen mode)", 2*time.Second)
+		case "normal", "show", "on", "default":
+			m.sidebarMode = SidebarNormal
+			m.setToast("Sidebar: Normal (24 cols)", 2*time.Second)
+		default:
+			m.addSystemMsg("Usage: /sidebar [normal | wide | hide | toggle]")
+			return
 		}
 		m.recalculateViewport()
+		m.viewport.SetContent(m.renderMessages())
 
 	case "/paste", "/p":
 		clipText, err := system.ReadClipboard()
@@ -1814,7 +1909,35 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			m.setToast(fmt.Sprintf("[ROOM] Switched to Room #%s", newRoom), 5*time.Second)
 		}
 
-	case "/init", "/repo", "/workspace":
+	case "/cd", "/switchrepo":
+		if len(parts) < 2 {
+			m.addSystemMsg("Usage: /cd <path_or_recent_index> (e.g., /cd ~/Projects/backend or /cd 1)")
+			return
+		}
+		m.handleRepoSwitch(parts[1])
+
+	case "/projects":
+		m.showRecentRepos()
+
+	case "/repo", "/workspace":
+		if len(parts) > 1 {
+			sub := strings.ToLower(parts[1])
+			if sub == "switch" || sub == "cd" {
+				if len(parts) < 3 {
+					m.addSystemMsg("Usage: /repo switch <path_or_recent_index>")
+					return
+				}
+				m.handleRepoSwitch(parts[2])
+				return
+			}
+			if sub == "list" || sub == "ls" || sub == "recents" {
+				m.showRecentRepos()
+				return
+			}
+		}
+		fallthrough
+
+	case "/init":
 		roomName := ""
 		pass := ""
 		if len(parts) > 1 {
@@ -2084,20 +2207,33 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		m.viewport.SetContent(m.renderMessages())
 		m.viewport.GotoBottom()
 
-	case "/issue":
-		if len(parts) < 2 {
-			m.addSystemMsg("Usage: /issue <number>\nExample: /issue 4")
-			return
-		}
-		issueNum, err := strconv.Atoi(strings.TrimPrefix(parts[1], "#"))
-		if err != nil {
-			m.addSystemMsg("Usage: /issue <number>")
-			return
-		}
-
+	case "/issue", "/issues":
 		repo := ""
 		if wsCfg, _, err := workspace.FindWorkspace(""); err == nil && wsCfg.Repo != "" {
 			repo = wsCfg.Repo
+		}
+
+		if len(parts) < 2 || parts[1] == "list" || parts[1] == "ls" || command == "/issues" {
+			state := "open"
+			if len(parts) > 2 && (parts[2] == "closed" || parts[2] == "all") {
+				state = parts[2]
+			} else if len(parts) == 2 && (parts[1] == "closed" || parts[1] == "all") {
+				state = parts[1]
+			}
+			issues, err := ghbridge.FetchIssueList(repo, state, 15)
+			if err != nil {
+				m.addSystemMsg(fmt.Sprintf("[GH] %v", err))
+				return
+			}
+			listStr := ghbridge.FormatIssueList(issues, repo)
+			m.addSystemMsg(listStr)
+			return
+		}
+
+		issueNum, err := strconv.Atoi(strings.TrimPrefix(parts[1], "#"))
+		if err != nil {
+			m.addSystemMsg("Usage: /issue <number> (or /issues to list)")
+			return
 		}
 
 		iss, err := ghbridge.FetchIssue(repo, issueNum)
@@ -2389,12 +2525,34 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 }
 
 func (m *Model) setToast(text string, dur time.Duration) {
+	m.toastID++
+	id := m.toastID
 	m.toastMsg = text
 	m.toastExpires = time.Now().Add(dur)
+	m.recalculateViewport()
+	go func() {
+		time.Sleep(dur)
+		if activeProgram != nil {
+			activeProgram.Send(toastClearMsg{id: id})
+		}
+	}()
 }
 
 func (m *Model) addSystemMsg(text string) {
-	m.setToast(text, 5*time.Second)
+	if strings.Contains(text, "\n") || len(text) > 80 {
+		sysMsg := ChatMessage{
+			SenderID:   "system",
+			SenderName: "system",
+			Content:    text,
+			Timestamp:  time.Now(),
+			IsSystem:   true,
+		}
+		m.messages = append(m.messages, sysMsg)
+		m.viewport.SetContent(m.renderMessages())
+		m.viewport.GotoBottom()
+	} else {
+		m.setToast(text, 4*time.Second)
+	}
 }
 
 func formatTimeDivider(t time.Time, now time.Time, width int) string {
@@ -2457,6 +2615,10 @@ func (m *Model) renderMessages() string {
 		}
 
 		if msg.IsSystem {
+			sysLine := lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render("◆ ") +
+				lipgloss.NewStyle().Foreground(MutedColor).Render(msg.Content)
+			sb.WriteString(lipgloss.NewStyle().Width(wrapWidth).Render(sysLine) + "\n\n")
+			lastSender = ""
 			continue
 		}
 			isGrouped := false
@@ -2633,6 +2795,97 @@ func (m *Model) refreshSharedFiles() {
 	}
 }
 
+func (m *Model) handleRepoSwitch(target string) {
+	target = strings.TrimSpace(target)
+	if idx, err := strconv.Atoi(target); err == nil {
+		recents, _ := workspace.GetRecentRepos()
+		if idx >= 1 && idx <= len(recents) {
+			target = recents[idx-1]
+		} else {
+			m.addSystemMsg(fmt.Sprintf("[ERR] Recent repo index out of range (1-%d). Use `/projects` to list.", len(recents)))
+			return
+		}
+	}
+
+	resolved, err := workspace.ResolvePath(target)
+	if err != nil {
+		m.addSystemMsg(fmt.Sprintf("[ERR] %v", err))
+		return
+	}
+
+	if err := os.Chdir(resolved); err != nil {
+		m.addSystemMsg(fmt.Sprintf("[ERR] Failed to change directory: %v", err))
+		return
+	}
+
+	_ = workspace.AddRecentRepo(resolved)
+
+	// 1. Refresh Git branch in UI header
+	m.gitBranch = gitcollab.GetCurrentBranch(resolved)
+
+	// 2. Reset and re-scan conflict radar
+	m.myDirtyFiles = nil
+	m.radarConflicts = nil
+	m.checkLocalRadar()
+
+	// 3. Inspect if target repo has a .termchat/room.json project room
+	roomHint := ""
+	if wsCfg, _, err := workspace.FindWorkspace(resolved); err == nil && wsCfg.Room != "" {
+		if wsCfg.Room != m.manager.RoomName {
+			roomHint = fmt.Sprintf("\n↳ Detected project room #%s! (Type `/join %s` to switch room)", wsCfg.Room, wsCfg.Room)
+		}
+	}
+
+	branchBadge := "no git"
+	if m.gitBranch != "" {
+		branchBadge = fmt.Sprintf("⎇ %s", m.gitBranch)
+	}
+
+	m.addSystemMsg(fmt.Sprintf("◆ Switched active workspace to: %s (%s)%s", resolved, branchBadge, roomHint))
+	m.setToast(fmt.Sprintf("Switched repo: %s (%s)", filepath.Base(resolved), branchBadge), 3*time.Second)
+}
+
+func (m *Model) showRecentRepos() {
+	recents, err := workspace.GetRecentRepos()
+	if err != nil || len(recents) == 0 {
+		m.addSystemMsg("◆ RECENT REPOSITORIES\n  (No recent repositories tracked yet. Use `/cd <path>` to add one)")
+		return
+	}
+	cwd, _ := os.Getwd()
+	var sb strings.Builder
+	sb.WriteString("◆ RECENT REPOSITORIES\n")
+	for i, r := range recents {
+		marker := ""
+		if r == cwd {
+			marker = " ● (active)"
+		}
+		sb.WriteString(fmt.Sprintf("  • [%d] %s%s\n", i+1, r, marker))
+	}
+	sb.WriteString("\n  ↳ Switch anytime with `/cd <number>` (e.g. `/cd 1`) or `/cd <path>`")
+	m.addSystemMsg(sb.String())
+}
+
+func (m *Model) toggleSidebar() (tea.Model, tea.Cmd) {
+	if m.width < 70 {
+		m.setToast("[!] Terminal too narrow for sidebar (< 70 columns)", 3*time.Second)
+		return m, nil
+	}
+	switch m.sidebarMode {
+	case SidebarNormal:
+		m.sidebarMode = SidebarWide
+		m.setToast("Sidebar: Wide (36 cols)", 2*time.Second)
+	case SidebarWide:
+		m.sidebarMode = SidebarHidden
+		m.setToast("Sidebar: Hidden (Zen mode)", 2*time.Second)
+	case SidebarHidden:
+		m.sidebarMode = SidebarNormal
+		m.setToast("Sidebar: Normal (24 cols)", 2*time.Second)
+	}
+	m.recalculateViewport()
+	m.viewport.SetContent(m.renderMessages())
+	return m, nil
+}
+
 func (m *Model) recalculateViewport() {
 	headerHeight := 4
 	inputHeight := 3
@@ -2648,8 +2901,12 @@ func (m *Model) recalculateViewport() {
 	if len(m.radarConflicts) > 0 {
 		radarHeight = 1
 	}
+	toastHeight := 0
+	if m.toastMsg != "" && time.Now().Before(m.toastExpires) {
+		toastHeight = 1
+	}
 
-	vpHeight := m.height - headerHeight - inputHeight - transferHeight - updateHeight - radarHeight - 2
+	vpHeight := m.height - headerHeight - inputHeight - transferHeight - updateHeight - radarHeight - toastHeight - 2
 	if vpHeight < 4 {
 		vpHeight = 4
 	}

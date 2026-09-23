@@ -255,13 +255,14 @@ func (m *Model) View() string {
 
 	var toastBanner string
 	if m.toastMsg != "" && time.Now().Before(m.toastExpires) {
+		escHint := lipgloss.NewStyle().Foreground(MutedColor).Faint(true).Render("[esc to close]")
 		toastBanner = lipgloss.NewStyle().
 			Foreground(SecondaryColor).
 			Background(BgLight).
 			Bold(true).
 			Padding(0, 1).
 			Width(m.width).
-			Render(fmt.Sprintf("» %s", m.toastMsg))
+			Render(fmt.Sprintf("» %s  %s", m.toastMsg, escHint))
 	}
 
 	var layout []string
@@ -488,7 +489,7 @@ func (m *Model) renderHelpView() string {
 		HelpKeyStyle.Render("/diff / /patch   "), HelpDescStyle.Render("Broadcast uncommitted Git diff card (#patch-xxxx)"),
 		HelpKeyStyle.Render("/apply <id>      "), HelpDescStyle.Render("Safely apply patch directly to your local workspace"),
 		HelpKeyStyle.Render("/branch /checkout"), HelpDescStyle.Render("Inspect current git branch or switch branches (/switch)"),
-		HelpKeyStyle.Render("/pr / /issue / /ci"), HelpDescStyle.Render("GitHub PR cards, issue previews & live CI/CD status"),
+		HelpKeyStyle.Render("/pr / /issues / /ci"), HelpDescStyle.Render("GitHub PR cards, issue previews (/issues) & CI status"),
 		HelpKeyStyle.Render("Ctrl+X / /editor "), HelpDescStyle.Render("Open $EDITOR (nvim/nano/vim) to compose code/notes"),
 		HelpKeyStyle.Render("Shift/Alt+Enter   "), HelpDescStyle.Render("Insert newline / multiline draft (or Ctrl+J / Ctrl+N)"),
 		HelpKeyStyle.Render("Ctrl+E / F4      "), HelpDescStyle.Render("Toggle Discord-style folding on code blocks"),
