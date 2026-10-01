@@ -17,6 +17,10 @@ func (m *Model) View() string {
 	}
 
 	// 1. Render Modals
+	if m.showModal {
+		return m.renderOutputModal()
+	}
+
 	if m.filePicker.Active {
 		return m.filePicker.View(m.width, m.height)
 	}
@@ -648,4 +652,54 @@ func renderProgressBar(pct, width int) string {
 
 	return lipgloss.NewStyle().Foreground(SecondaryColor).Render("["+filled) +
 		lipgloss.NewStyle().Foreground(MutedColor).Render(empty+"]")
+}
+
+func (m *Model) renderOutputModal() string {
+	boxWidth := m.width - 6
+	if boxWidth > 92 {
+		boxWidth = 92
+	}
+	if boxWidth < 30 {
+		boxWidth = 30
+	}
+
+	boxHeight := m.height - 4
+	if boxHeight > 28 {
+		boxHeight = 28
+	}
+	if boxHeight < 8 {
+		boxHeight = 8
+	}
+
+	modalBox := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(PrimaryColor).
+		Padding(1, 2).
+		Width(boxWidth).
+		Height(boxHeight)
+
+	title := TitleStyle.Render(m.modalTitle)
+
+	scrollPct := int(m.modalViewport.ScrollPercent() * 100)
+	if scrollPct < 0 {
+		scrollPct = 0
+	}
+	if scrollPct > 100 {
+		scrollPct = 100
+	}
+	percentBadge := lipgloss.NewStyle().Foreground(SecondaryColor).Bold(true).Render(fmt.Sprintf("[%d%%]", scrollPct))
+	hints := lipgloss.NewStyle().Foreground(MutedColor).Render("↑/↓ / j/k: Scroll • PgUp/PgDn • Esc / q: Close")
+
+	footer := fmt.Sprintf("%s  %s", percentBadge, hints)
+	body := m.modalViewport.View()
+
+	content := fmt.Sprintf("%s\n\n%s\n\n%s", title, body, footer)
+
+	return lipgloss.Place(
+		m.width,
+		m.height,
+		lipgloss.Center,
+		lipgloss.Center,
+		modalBox.Render(content),
+	)
 }

@@ -97,6 +97,10 @@ type Model struct {
 	showFilesModal  bool
 	selectedFileIdx int
 
+	showModal     bool
+	modalTitle    string
+	modalViewport viewport.Model
+
 	roomTopic       string
 	pinnedMsgs      []ChatMessage
 	userStatuses    map[string]string
@@ -569,6 +573,52 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Modal controls when Inspection/Output Modal is open
+		if m.showModal {
+			switch msg.Type {
+			case tea.KeyEsc, tea.KeyCtrlC, tea.KeyEnter:
+				m.closeModal()
+				return m, nil
+			case tea.KeyUp:
+				m.modalViewport.LineUp(1)
+				return m, nil
+			case tea.KeyDown:
+				m.modalViewport.LineDown(1)
+				return m, nil
+			case tea.KeyPgUp:
+				m.modalViewport.HalfViewUp()
+				return m, nil
+			case tea.KeyPgDown:
+				m.modalViewport.HalfViewDown()
+				return m, nil
+			case tea.KeyHome:
+				m.modalViewport.GotoTop()
+				return m, nil
+			case tea.KeyEnd:
+				m.modalViewport.GotoBottom()
+				return m, nil
+			case tea.KeyRunes:
+				switch msg.String() {
+				case "q", "Q":
+					m.closeModal()
+					return m, nil
+				case "k":
+					m.modalViewport.LineUp(1)
+					return m, nil
+				case "j":
+					m.modalViewport.LineDown(1)
+					return m, nil
+				case "g":
+					m.modalViewport.GotoTop()
+					return m, nil
+				case "G":
+					m.modalViewport.GotoBottom()
+					return m, nil
+				}
+			}
+			return m, nil
+		}
+
 		// Modal controls when Room Files Vault is open
 		if m.showFilesModal {
 			switch msg.Type {
@@ -860,6 +910,24 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.recalculateViewport()
 		m.textInput.Width = m.width - 10
 		m.viewport.GotoBottom()
+		if m.showModal {
+			boxWidth := m.width - 6
+			if boxWidth > 88 {
+				boxWidth = 88
+			}
+			if boxWidth < 30 {
+				boxWidth = 30
+			}
+			boxHeight := m.height - 6
+			if boxHeight > 26 {
+				boxHeight = 26
+			}
+			if boxHeight < 8 {
+				boxHeight = 8
+			}
+			m.modalViewport.Width = boxWidth - 4
+			m.modalViewport.Height = boxHeight - 5
+		}
 
 	case tickUIMsg:
 		cmds = append(cmds, tickUICmd())
@@ -956,12 +1024,14 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch msg.kind {
-		case ghFetchPR, ghFetchIssue:
-			m.postCard(msg.text)
+		case ghFetchPR:
+			m.openModal("◆ GITHUB PULL REQUEST", msg.text)
+		case ghFetchIssue:
+			m.openModal("◆ GITHUB ISSUE", msg.text)
 		case ghFetchIssueList:
-			m.addSystemMsg(msg.text)
+			m.openModal("◆ GITHUB ISSUES", msg.text)
 		case ghFetchCI:
-			m.addSystemMsg(fmt.Sprintf("[CI/CD] %s", msg.text))
+			m.openModal("◆ CI/CD ACTIONS STATUS", msg.text)
 		}
 		return m, nil
 
@@ -2218,11 +2288,14 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 				sb.WriteString("\n✓ Radar clear: No file collisions detected with teammates.")
 			}
 		}
-		m.addSystemMsg(sb.String())
+		m.openModal("◆ GIT CONFLICT RADAR", sb.String())
 		return
 
-	case "/diff", "/patch":
-		staged := len(parts) > 1 && (parts[1] == "staged" || parts[1] == "--staged" || parts[1] == "--cached")
+	case "/diff", "/patch", "/share-diff":
+		isShare := command == "/share-diff" || (len(parts) > 1 && (parts[1] == "share" || parts[1] == "--share"))
+		staged := (len(parts) > 1 && (parts[1] == "staged" || parts[1] == "--staged" || parts[1] == "--cached")) ||
+			(len(parts) > 2 && (parts[2] == "staged" || parts[2] == "--staged" || parts[2] == "--cached"))
+
 		diffRes, err := gitcollab.CaptureDiff("", staged)
 		if err != nil {
 			m.addSystemMsg(fmt.Sprintf("[DIFF] %v", err))
@@ -2242,23 +2315,30 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		cardMsg := fmt.Sprintf("[GIT PATCH #patch-%s] %s\n• Changes: +%d / -%d in %d file(s) (`%s`)\n• Apply: Type `/apply %s` to apply this patch directly to your repository!\n```diff\n%s\n```",
 			diffRes.PatchID, diffType, diffRes.Additions, diffRes.Deletions, len(diffRes.Files), filesList, diffRes.PatchID, diffRes.RawDiff)
 
-		m.messages = append(m.messages, ChatMessage{
-			SenderID:   m.manager.LocalID,
-			SenderName: m.manager.LocalName,
-			Content:    cardMsg,
-			Timestamp:  time.Now(),
-			IsMe:       true,
-		})
-		system.AppendHistory(m.manager.RoomName, system.HistoryEntry{
-			SenderID:   m.manager.LocalID,
-			SenderName: m.manager.LocalName,
-			Content:    cardMsg,
-			Timestamp:  time.Now(),
-			IsMe:       true,
-		})
-		_ = m.manager.SendChat(cardMsg)
-		m.viewport.SetContent(m.renderMessages())
-		m.viewport.GotoBottom()
+		if isShare {
+			m.messages = append(m.messages, ChatMessage{
+				SenderID:   m.manager.LocalID,
+				SenderName: m.manager.LocalName,
+				Content:    cardMsg,
+				Timestamp:  time.Now(),
+				IsMe:       true,
+			})
+			system.AppendHistory(m.manager.RoomName, system.HistoryEntry{
+				SenderID:   m.manager.LocalID,
+				SenderName: m.manager.LocalName,
+				Content:    cardMsg,
+				Timestamp:  time.Now(),
+				IsMe:       true,
+			})
+			_ = m.manager.SendChat(cardMsg)
+			m.viewport.SetContent(m.renderMessages())
+			m.viewport.GotoBottom()
+			m.setToast("✓ Shared git patch with room", 3*time.Second)
+		} else {
+			header := fmt.Sprintf("%s\n• Patch ID: #patch-%s | Changes: +%d / -%d in %d file(s)\n• Tip: Type `/diff share` or `/share-diff` to broadcast this patch to your team\n\n",
+				diffType, diffRes.PatchID, diffRes.Additions, diffRes.Deletions, len(diffRes.Files))
+			m.openModal(fmt.Sprintf("◆ GIT DIFF (%s)", diffType), header+diffRes.RawDiff)
+		}
 
 	case "/apply":
 		if len(parts) < 2 {
@@ -3102,6 +3182,44 @@ func (m *Model) toggleSidebar() (tea.Model, tea.Cmd) {
 	m.recalculateViewport()
 	m.viewport.SetContent(m.renderMessages())
 	return m, nil
+}
+
+func (m *Model) openModal(title, content string) {
+	m.showModal = true
+	m.modalTitle = title
+
+	boxWidth := m.width - 6
+	if boxWidth > 88 {
+		boxWidth = 88
+	}
+	if boxWidth < 30 {
+		boxWidth = 30
+	}
+
+	boxHeight := m.height - 6
+	if boxHeight > 26 {
+		boxHeight = 26
+	}
+	if boxHeight < 8 {
+		boxHeight = 8
+	}
+
+	vpWidth := boxWidth - 4
+	vpHeight := boxHeight - 5
+	if vpHeight < 3 {
+		vpHeight = 3
+	}
+
+	m.modalViewport = viewport.New(vpWidth, vpHeight)
+	m.modalViewport.KeyMap = viewport.KeyMap{}
+	m.modalViewport.SetContent(content)
+	m.modalViewport.GotoTop()
+}
+
+func (m *Model) closeModal() {
+	m.showModal = false
+	m.modalTitle = ""
+	m.modalViewport.SetContent("")
 }
 
 func (m *Model) recalculateViewport() {
