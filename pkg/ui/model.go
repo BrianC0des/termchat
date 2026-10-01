@@ -97,15 +97,18 @@ type Model struct {
 	showFilesModal  bool
 	selectedFileIdx int
 
-	roomTopic     string
-	pinnedMsgs    []ChatMessage
-	userStatuses  map[string]string
-	myStatus      string
-	sidebarMode   SidebarMode
-	roomExpiry    time.Time
-	hasRoomExpiry bool
-	autoDeleteTTL time.Duration
-	updateStatus  string
+	roomTopic       string
+	pinnedMsgs      []ChatMessage
+	userStatuses    map[string]string
+	myStatus        string
+	sidebarMode     SidebarMode
+	roomExpiry      time.Time
+	hasRoomExpiry   bool
+	autoDeleteTTL   time.Duration
+	updateStatus    string
+	relayStatus     string
+	relayConnecting bool
+	relaySpinnerIdx int
 
 	pastedSnippets   map[string]string
 	pasteCounter     int
@@ -125,8 +128,12 @@ type Model struct {
 	radarTickCount int
 
 	// Fix 1: cached GitHub auth — avoid spawning `gh auth token` on every frame
-	isGHAuthed       bool
-	ghAuthLastCheck  time.Time
+	isGHAuthed      bool
+	ghAuthLastCheck time.Time
+
+	// pendingCmds collects tea.Cmds queued by synchronous helpers such as
+	// handleSlashCommand; Update drains them after the keypress is handled.
+	pendingCmds []tea.Cmd
 
 	// Fix 2: dirty flag — only re-render messages when something actually changed
 	messagesDirty bool
@@ -149,10 +156,43 @@ const (
 // Custom Tea Messages
 type updateProgressMsg string
 
+type relayStatusMsg struct {
+	status    string
+	connected bool
+}
+
 // Fix 3: background radar result sent back to the UI goroutine via tea.Cmd
 type localRadarResult struct {
-	branch     string
-	dirty      []string
+	dir    string // workspace the scan ran in; stale results are discarded
+	branch string
+	dirty  []string
+}
+
+// ghAuthRefreshMsg carries the result of a background GitHub-auth probe back
+// to Update() so m.isGHAuthed is only ever written on the UI goroutine (H5).
+type ghAuthRefreshMsg struct {
+	authed bool
+}
+
+type ghFetchKind int
+
+const (
+	ghFetchPR ghFetchKind = iota
+	ghFetchIssue
+	ghFetchIssueList
+	ghFetchCI
+)
+
+// ghFetchLoadingPrefix marks the transient "fetching" toast so the completion
+// handler can clear it without clobbering an unrelated toast.
+const ghFetchLoadingPrefix = "[GH] Fetching"
+
+// ghFetchDoneMsg is the completion message for an async ghbridge call
+// (/pr, /issue, /issues, /ci). text is the already-formatted result.
+type ghFetchDoneMsg struct {
+	kind ghFetchKind
+	text string
+	err  error
 }
 
 type conflictRadarMsg struct {
@@ -277,13 +317,13 @@ func openEditorCmd() tea.Cmd {
 }
 
 type incomingMsg struct {
-	senderID      string
-	senderName    string
-	text          string
-	ts            time.Time
-	replyNum      int
-	replySender   string
-	replyText     string
+	senderID    string
+	senderName  string
+	text        string
+	ts          time.Time
+	replyNum    int
+	replySender string
+	replyText   string
 }
 
 type statusUpdateMsg struct {
@@ -400,8 +440,39 @@ func NewModel(mgr *network.Manager) *Model {
 	return m
 }
 
+// queueCmd schedules cmd to be returned from the current Update call.
+func (m *Model) queueCmd(cmd tea.Cmd) {
+	if cmd != nil {
+		m.pendingCmds = append(m.pendingCmds, cmd)
+	}
+}
+
+// takePendingCmds drains and batches the queued commands.
+func (m *Model) takePendingCmds() tea.Cmd {
+	if len(m.pendingCmds) == 0 {
+		return nil
+	}
+	cmds := m.pendingCmds
+	m.pendingCmds = nil
+	return tea.Batch(cmds...)
+}
+
+// queryGHAuth probes GitHub auth without touching the model, so it is safe to
+// run on any goroutine.
+func queryGHAuth() ghAuthRefreshMsg {
+	res, err := ghauth.GetToken()
+	return ghAuthRefreshMsg{authed: err == nil && res.Token != ""}
+}
+
+// ghAuthRefreshCmd runs queryGHAuth off the UI goroutine and delivers the
+// result as a ghAuthRefreshMsg.
+func ghAuthRefreshCmd() tea.Cmd {
+	return func() tea.Msg { return queryGHAuth() }
+}
+
 // refreshGHAuth re-checks GitHub authentication and caches the result.
-// Called once at startup, and after /login or /logout. Never called in View().
+// It mutates the model directly, so it must only run before the Bubble Tea
+// program starts (NewModel). Afterwards use ghAuthRefreshCmd / queryGHAuth.
 func (m *Model) refreshGHAuth() {
 	res, err := ghauth.GetToken()
 	m.isGHAuthed = err == nil && res.Token != ""
@@ -774,11 +845,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pastedSnippets = make(map[string]string)
 
 			input := strings.TrimSpace(expandedInput)
+			var enterCmd tea.Cmd
 			if input != "" {
 				m.handleInput(input)
 				m.textInput.SetValue("")
+				enterCmd = m.takePendingCmds()
 			}
-			return m, nil
+			return m, enterCmd
 		}
 
 	case tea.WindowSizeMsg:
@@ -835,25 +908,61 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// so git subprocess never blocks keypress rendering
 		m.radarTickCount++
 		if m.radarTickCount%4 == 0 {
-			cmds = append(cmds, func() tea.Msg {
-				branch := gitcollab.GetCurrentBranch("")
-				var dirty []string
-				if branch != "" {
-					dirty, _ = gitcollab.GetDirtyFiles("")
-				}
-				return localRadarResult{branch: branch, dirty: dirty}
-			})
+			cmds = append(cmds, m.radarScanCmd())
 		}
 
 		// Fix 1: refresh cached GH auth every 60s so it stays accurate without blocking typing
 		if time.Since(m.ghAuthLastCheck) > 60*time.Second {
-			go func() {
-				m.refreshGHAuth()
-			}()
+			m.ghAuthLastCheck = time.Now() // debounce: one probe in flight per interval
+			cmds = append(cmds, ghAuthRefreshCmd())
+		}
+
+		if m.relayConnecting {
+			m.relaySpinnerIdx = (m.relaySpinnerIdx + 1) % 10
 		}
 
 	case updateProgressMsg:
 		m.updateStatus = string(msg)
+		return m, nil
+
+	case relayStatusMsg:
+		if msg.connected {
+			m.relayConnecting = false
+			m.relayStatus = ""
+			m.setToast(fmt.Sprintf("✓ Connected to Cloud Room #%s", m.manager.RoomName), 3*time.Second)
+		} else {
+			m.relayConnecting = msg.status != ""
+			m.relayStatus = msg.status
+		}
+		m.recalculateViewport()
+		return m, nil
+
+	case ghAuthRefreshMsg:
+		m.isGHAuthed = msg.authed
+		m.ghAuthLastCheck = time.Now()
+		return m, nil
+
+	case ghFetchDoneMsg:
+		if strings.HasPrefix(m.toastMsg, ghFetchLoadingPrefix) {
+			m.toastMsg = ""
+			m.recalculateViewport()
+		}
+		prefix := "[GH]"
+		if msg.kind == ghFetchCI {
+			prefix = "[CI]"
+		}
+		if msg.err != nil {
+			m.addSystemMsg(fmt.Sprintf("%s %v", prefix, msg.err))
+			return m, nil
+		}
+		switch msg.kind {
+		case ghFetchPR, ghFetchIssue:
+			m.postCard(msg.text)
+		case ghFetchIssueList:
+			m.addSystemMsg(msg.text)
+		case ghFetchCI:
+			m.addSystemMsg(fmt.Sprintf("[CI/CD] %s", msg.text))
+		}
 		return m, nil
 
 	case conflictRadarMsg:
@@ -872,6 +981,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Fix 3: handle background git scan result without blocking UI
 	case localRadarResult:
+		// Drop results that were computed for a workspace we've since left.
+		if cwd, _ := os.Getwd(); msg.dir == "" || msg.dir != cwd {
+			return m, nil
+		}
 		prevBranch := m.gitBranch
 		prevDirty := len(m.myDirtyFiles)
 		if msg.branch != "" {
@@ -2149,7 +2262,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 
 	case "/apply":
 		if len(parts) < 2 {
-			m.addSystemMsg("Usage: /apply <patch_id>\nExample: /apply 7f8a9b1c (or /apply #patch-7f8a9b1c)")
+			m.addSystemMsg("Usage: /apply <patch_id>\nExample: /apply 7f8a9b1c2d3e4f5a (or /apply #patch-7f8a9b1c2d3e4f5a)")
 			return
 		}
 		patchID := strings.TrimPrefix(parts[1], "#patch-")
@@ -2161,13 +2274,10 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			for i := len(m.messages) - 1; i >= 0; i-- {
 				msg := m.messages[i].Content
 				if strings.Contains(msg, "#patch-"+patchID) {
-					if startIdx := strings.Index(msg, "```diff\n"); startIdx != -1 {
-						raw := msg[startIdx+8:]
-						if endIdx := strings.Index(raw, "\n```"); endIdx != -1 {
-							patchContent = raw[:endIdx]
-							ok = true
-							break
-						}
+					if diff, found := extractDiffBlock(msg); found {
+						patchContent = diff
+						ok = true
+						break
 					}
 				}
 			}
@@ -2184,6 +2294,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			return
 		}
 		m.addSystemMsg(fmt.Sprintf("[GIT] Applied patch #patch-%s cleanly to your local workspace! (%s)", patchID, msg))
+		m.queueCmd(m.radarScanCmd()) // refresh dirty files / conflict radar now, not on the next tick
 
 	case "/branch", "/branches":
 		m.gitBranch = gitcollab.GetCurrentBranch("")
@@ -2208,6 +2319,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 				} else {
 					m.gitBranch = gitcollab.GetCurrentBranch("")
 					m.addSystemMsg(fmt.Sprintf("[GIT] Switched to PR #%d branch! (%s)", prNum, msg))
+					m.queueCmd(m.radarScanCmd())
 				}
 				return
 			}
@@ -2221,6 +2333,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		}
 		m.gitBranch = gitcollab.GetCurrentBranch("")
 		m.addSystemMsg(fmt.Sprintf("[GIT] Switched to branch '%s'!", targetBranch))
+		m.queueCmd(m.radarScanCmd())
 
 	case "/pr":
 		if len(parts) < 2 {
@@ -2265,31 +2378,14 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			return
 		}
 
-		pr, err := ghbridge.FetchPR(repo, prNum)
-		if err != nil {
-			m.addSystemMsg(fmt.Sprintf("[GH] %v", err))
-			return
-		}
-
-		cardMsg := ghbridge.FormatPRCard(pr)
-
-		m.messages = append(m.messages, ChatMessage{
-			SenderID:   m.manager.LocalID,
-			SenderName: m.manager.LocalName,
-			Content:    cardMsg,
-			Timestamp:  time.Now(),
-			IsMe:       true,
+		m.setToast(fmt.Sprintf("%s PR #%d...", ghFetchLoadingPrefix, prNum), 20*time.Second)
+		m.queueCmd(func() tea.Msg {
+			pr, err := ghbridge.FetchPR(repo, prNum)
+			if err != nil {
+				return ghFetchDoneMsg{kind: ghFetchPR, err: err}
+			}
+			return ghFetchDoneMsg{kind: ghFetchPR, text: ghbridge.FormatPRCard(pr)}
 		})
-		system.AppendHistory(m.manager.RoomName, system.HistoryEntry{
-			SenderID:   m.manager.LocalID,
-			SenderName: m.manager.LocalName,
-			Content:    cardMsg,
-			Timestamp:  time.Now(),
-			IsMe:       true,
-		})
-		_ = m.manager.SendChat(cardMsg)
-		m.viewport.SetContent(m.renderMessages())
-		m.viewport.GotoBottom()
 
 	case "/issue", "/issues":
 		repo := m.getActiveRepo()
@@ -2319,13 +2415,14 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 				return
 			}
 
-			issues, err := ghbridge.FetchIssueList(repo, state, 15)
-			if err != nil {
-				m.addSystemMsg(fmt.Sprintf("[GH] %v", err))
-				return
-			}
-			listStr := ghbridge.FormatIssueList(issues, repo)
-			m.addSystemMsg(listStr)
+			m.setToast(fmt.Sprintf("%s issues for %s...", ghFetchLoadingPrefix, repo), 20*time.Second)
+			m.queueCmd(func() tea.Msg {
+				issues, err := ghbridge.FetchIssueList(repo, state, 15)
+				if err != nil {
+					return ghFetchDoneMsg{kind: ghFetchIssueList, err: err}
+				}
+				return ghFetchDoneMsg{kind: ghFetchIssueList, text: ghbridge.FormatIssueList(issues, repo)}
+			})
 			return
 		}
 
@@ -2345,49 +2442,38 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			return
 		}
 
-		iss, err := ghbridge.FetchIssue(repo, issueNum)
-		if err != nil {
-			m.addSystemMsg(fmt.Sprintf("[GH] %v", err))
-			return
-		}
-
-		cardMsg := ghbridge.FormatIssueCard(iss)
-
-		m.messages = append(m.messages, ChatMessage{
-			SenderID:   m.manager.LocalID,
-			SenderName: m.manager.LocalName,
-			Content:    cardMsg,
-			Timestamp:  time.Now(),
-			IsMe:       true,
+		m.setToast(fmt.Sprintf("%s issue #%d...", ghFetchLoadingPrefix, issueNum), 20*time.Second)
+		m.queueCmd(func() tea.Msg {
+			iss, err := ghbridge.FetchIssue(repo, issueNum)
+			if err != nil {
+				return ghFetchDoneMsg{kind: ghFetchIssue, err: err}
+			}
+			return ghFetchDoneMsg{kind: ghFetchIssue, text: ghbridge.FormatIssueCard(iss)}
 		})
-		system.AppendHistory(m.manager.RoomName, system.HistoryEntry{
-			SenderID:   m.manager.LocalID,
-			SenderName: m.manager.LocalName,
-			Content:    cardMsg,
-			Timestamp:  time.Now(),
-			IsMe:       true,
-		})
-		_ = m.manager.SendChat(cardMsg)
-		m.viewport.SetContent(m.renderMessages())
-		m.viewport.GotoBottom()
 
 	case "/ci":
 		repo := m.getActiveRepo()
-		branch := ""
-		if out, err := exec.Command("git", "branch", "--show-current").Output(); err == nil {
-			branch = strings.TrimSpace(string(out))
-		}
 		if repo == "" {
 			m.addSystemMsg("[CI] No GitHub repository detected. Run inside a git repo or switch with `/cd <path>`.")
 			return
 		}
 
-		status, err := ghbridge.FetchCIStatus(repo, branch)
-		if err != nil {
-			m.addSystemMsg(fmt.Sprintf("[CI] %v", err))
-			return
-		}
-		m.addSystemMsg(fmt.Sprintf("[CI/CD] %s", status))
+		// Capture the workspace on the UI goroutine; /cd calls os.Chdir process-wide.
+		ciDir, _ := os.Getwd()
+		m.setToast(fmt.Sprintf("%s CI status for %s...", ghFetchLoadingPrefix, repo), 20*time.Second)
+		m.queueCmd(func() tea.Msg {
+			branch := ""
+			bc := exec.Command("git", "branch", "--show-current")
+			bc.Dir = ciDir
+			if out, err := bc.Output(); err == nil {
+				branch = strings.TrimSpace(string(out))
+			}
+			status, err := ghbridge.FetchCIStatus(repo, branch)
+			if err != nil {
+				return ghFetchDoneMsg{kind: ghFetchCI, err: err}
+			}
+			return ghFetchDoneMsg{kind: ghFetchCI, text: status}
+		})
 
 	case "/editor", "/edit", "/compose":
 		if activeProgram != nil {
@@ -2423,7 +2509,9 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			m.manager.SetName(user.Login)
 			m.addSystemMsg(fmt.Sprintf("✓ Successfully authenticated as @%s!\nCredentials saved to ~/.config/termchat/hosts.json (0600)", user.Login))
 			m.setToast(fmt.Sprintf("✓ Logged in as @%s", user.Login), 5*time.Second)
-			m.refreshGHAuth() // update cached badge immediately
+			if activeProgram != nil {
+				activeProgram.Send(queryGHAuth()) // update cached badge immediately, on the UI goroutine
+			}
 		}()
 
 	case "/logout":
@@ -2431,7 +2519,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			m.addSystemMsg(fmt.Sprintf("[ERR] Failed to log out: %v", err))
 		} else {
 			m.addSystemMsg("✓ Logged out of TermChat GitHub session.")
-			m.refreshGHAuth() // clear cached badge immediately
+			m.queueCmd(ghAuthRefreshCmd()) // clear cached badge immediately
 		}
 
 	case "/identity", "/whoami", "/id":
@@ -2521,9 +2609,6 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 		}
 		m.addSystemMsg(strings.Join(lines, "\n"))
 
-
-
-
 	case "/clear":
 		m.messages = []ChatMessage{}
 		m.viewport.SetContent("")
@@ -2560,7 +2645,7 @@ func (m *Model) handleSlashCommand(cmdStr string) {
 			m.addSystemMsg("Usage: /send <file_path> [optional_expiry: 10m, 1h, 1d, 7d]\nExamples:\n  /send notes.pdf\n  /send secret.zip 1h\n  /send database.sql 7d")
 			return
 		}
-		
+
 		filePath := strings.Join(parts[1:], " ")
 		expiry := "24h"
 
@@ -2741,51 +2826,51 @@ func (m *Model) renderMessages() string {
 			lastSender = ""
 			continue
 		}
-			isGrouped := false
-			if lastSender != "" && msg.SenderName == lastSender && msg.ReplyToNum == 0 && msg.Timestamp.Sub(lastTime) < 90*time.Second {
-				isGrouped = true
-			}
+		isGrouped := false
+		if lastSender != "" && msg.SenderName == lastSender && msg.ReplyToNum == 0 && msg.Timestamp.Sub(lastTime) < 90*time.Second {
+			isGrouped = true
+		}
 
-			if msg.ReplyToNum > 0 {
-				replyQuote := lipgloss.NewStyle().
-					Foreground(MutedColor).
-					Italic(true).
-					Render(fmt.Sprintf("   ↳ Replying to #%d (@%s: \"%s\")", msg.ReplyToNum, msg.ReplyToSender, msg.ReplyToText))
-				sb.WriteString(replyQuote + "\n")
-			}
+		if msg.ReplyToNum > 0 {
+			replyQuote := lipgloss.NewStyle().
+				Foreground(MutedColor).
+				Italic(true).
+				Render(fmt.Sprintf("   ↳ Replying to #%d (@%s: \"%s\")", msg.ReplyToNum, msg.ReplyToSender, msg.ReplyToText))
+			sb.WriteString(replyQuote + "\n")
+		}
 
-			numBadge := lipgloss.NewStyle().Foreground(MutedColor).Render(fmt.Sprintf("#%d", msgIdx))
-			var timerBadge string
-			if !msg.ExpiresAt.IsZero() {
-				rem := time.Until(msg.ExpiresAt)
-				if rem > 0 {
-					secs := int(rem.Seconds())
-					timerBadge = " " + lipgloss.NewStyle().Foreground(WarningColor).Bold(true).Render(fmt.Sprintf("[TTL %02d:%02d]", secs/60, secs%60))
-				}
+		numBadge := lipgloss.NewStyle().Foreground(MutedColor).Render(fmt.Sprintf("#%d", msgIdx))
+		var timerBadge string
+		if !msg.ExpiresAt.IsZero() {
+			rem := time.Until(msg.ExpiresAt)
+			if rem > 0 {
+				secs := int(rem.Seconds())
+				timerBadge = " " + lipgloss.NewStyle().Foreground(WarningColor).Bold(true).Render(fmt.Sprintf("[TTL %02d:%02d]", secs/60, secs%60))
 			}
+		}
 
-			if isGrouped {
-				// Clean indented continuation: only message index and vertical guide
-				firstLinePrefix := fmt.Sprintf("   %s%s %s", numBadge, timerBadge, lipgloss.NewStyle().Foreground(MutedColor).Render("│"))
-				continuationPrefix := fmt.Sprintf("       %s", lipgloss.NewStyle().Foreground(MutedColor).Render("│"))
-				formatted := FormatChatMessageWithFold(msg.Content, wrapWidth, firstLinePrefix, continuationPrefix, m.manager.LocalName, m.expandCodeBlocks)
-				sb.WriteString(formatted)
-			} else {
-				if msgIdx > 1 && !lastTime.IsZero() && msg.Timestamp.Sub(lastTime) < 5*time.Minute {
-					sb.WriteString("\n")
-				}
-				prefix := fmt.Sprintf("%s%s", numBadge, timerBadge)
-				nameTag := getUserNameStyle(msg.SenderName, msg.IsMe).Render(fmt.Sprintf("@%s:", msg.SenderName))
-				firstLinePrefix := fmt.Sprintf("%s %s", prefix, nameTag)
-				firstWidth := lipgloss.Width(firstLinePrefix)
-				padLen := 0
-				if firstWidth > 5 {
-					padLen = firstWidth - 5
-				}
-				continuationPrefix := fmt.Sprintf("   %s %s", lipgloss.NewStyle().Foreground(MutedColor).Render("│"), strings.Repeat(" ", padLen))
-				formatted := FormatChatMessageWithFold(msg.Content, wrapWidth, firstLinePrefix, continuationPrefix, m.manager.LocalName, m.expandCodeBlocks)
-				sb.WriteString(formatted)
+		if isGrouped {
+			// Clean indented continuation: only message index and vertical guide
+			firstLinePrefix := fmt.Sprintf("   %s%s %s", numBadge, timerBadge, lipgloss.NewStyle().Foreground(MutedColor).Render("│"))
+			continuationPrefix := fmt.Sprintf("       %s", lipgloss.NewStyle().Foreground(MutedColor).Render("│"))
+			formatted := FormatChatMessageWithFold(msg.Content, wrapWidth, firstLinePrefix, continuationPrefix, m.manager.LocalName, m.expandCodeBlocks)
+			sb.WriteString(formatted)
+		} else {
+			if msgIdx > 1 && !lastTime.IsZero() && msg.Timestamp.Sub(lastTime) < 5*time.Minute {
+				sb.WriteString("\n")
 			}
+			prefix := fmt.Sprintf("%s%s", numBadge, timerBadge)
+			nameTag := getUserNameStyle(msg.SenderName, msg.IsMe).Render(fmt.Sprintf("@%s:", msg.SenderName))
+			firstLinePrefix := fmt.Sprintf("%s %s", prefix, nameTag)
+			firstWidth := lipgloss.Width(firstLinePrefix)
+			padLen := 0
+			if firstWidth > 5 {
+				padLen = firstWidth - 5
+			}
+			continuationPrefix := fmt.Sprintf("   %s %s", lipgloss.NewStyle().Foreground(MutedColor).Render("│"), strings.Repeat(" ", padLen))
+			formatted := FormatChatMessageWithFold(msg.Content, wrapWidth, firstLinePrefix, continuationPrefix, m.manager.LocalName, m.expandCodeBlocks)
+			sb.WriteString(formatted)
+		}
 
 		lastSender = msg.SenderName
 		lastTime = msg.Timestamp
@@ -2801,13 +2886,13 @@ func SetupEventBridge(p *tea.Program) network.NetworkEvents {
 	return network.NetworkEvents{
 		OnMessage: func(senderID, senderName, text string, ts time.Time, replyNum int, replySender, replyText string) {
 			p.Send(incomingMsg{
-				senderID:      senderID,
-				senderName:    senderName,
-				text:          text,
-				ts:            ts,
-				replyNum:      replyNum,
-				replySender:   replySender,
-				replyText:     replyText,
+				senderID:    senderID,
+				senderName:  senderName,
+				text:        text,
+				ts:          ts,
+				replyNum:    replyNum,
+				replySender: replySender,
+				replyText:   replyText,
 			})
 		},
 		OnPeerJoin: func(id, name, addr string) {
@@ -2857,6 +2942,9 @@ func SetupEventBridge(p *tea.Program) network.NetworkEvents {
 				branch:     branch,
 				dirtyFiles: dirtyFiles,
 			})
+		},
+		OnRelayStatus: func(status string, connected bool) {
+			p.Send(relayStatusMsg{status: status, connected: connected})
 		},
 	}
 }
@@ -3035,8 +3123,12 @@ func (m *Model) recalculateViewport() {
 	if m.toastMsg != "" && time.Now().Before(m.toastExpires) {
 		toastHeight = 1
 	}
+	relayHeight := 0
+	if m.relayStatus != "" {
+		relayHeight = 1
+	}
 
-	vpHeight := m.height - headerHeight - inputHeight - transferHeight - updateHeight - radarHeight - toastHeight - 2
+	vpHeight := m.height - headerHeight - inputHeight - transferHeight - updateHeight - radarHeight - toastHeight - relayHeight - 2
 	if vpHeight < 4 {
 		vpHeight = 4
 	}
@@ -3124,3 +3216,74 @@ func (m *Model) recomputeRadarConflicts() []string {
 	return res
 }
 
+// radarScanCmd scans the current workspace's branch and dirty files off the UI
+// goroutine and reports back via localRadarResult.
+func (m *Model) radarScanCmd() tea.Cmd {
+	// Capture the workspace here, on the UI goroutine, and query that
+	// exact directory. /cd calls os.Chdir (process-wide), so resolving
+	// "" inside the goroutine could read branch from one repo and dirty
+	// files from another if a switch lands mid-scan.
+	radarDir, _ := os.Getwd()
+	return func() tea.Msg {
+		if radarDir == "" {
+			return localRadarResult{}
+		}
+		branch := gitcollab.GetCurrentBranch(radarDir)
+		var dirty []string
+		if branch != "" {
+			dirty, _ = gitcollab.GetDirtyFiles(radarDir)
+		}
+		return localRadarResult{dir: radarDir, branch: branch, dirty: dirty}
+	}
+}
+
+// postCard appends a locally-authored card message, persists it, and
+// broadcasts it to the room.
+func (m *Model) postCard(cardMsg string) {
+	m.messages = append(m.messages, ChatMessage{
+		SenderID:   m.manager.LocalID,
+		SenderName: m.manager.LocalName,
+		Content:    cardMsg,
+		Timestamp:  time.Now(),
+		IsMe:       true,
+	})
+	system.AppendHistory(m.manager.RoomName, system.HistoryEntry{
+		SenderID:   m.manager.LocalID,
+		SenderName: m.manager.LocalName,
+		Content:    cardMsg,
+		Timestamp:  time.Now(),
+		IsMe:       true,
+	})
+	_ = m.manager.SendChat(cardMsg)
+	m.viewport.SetContent(m.renderMessages())
+	m.viewport.GotoBottom()
+}
+
+// extractDiffBlock returns the body of the first ```diff fenced block in msg.
+//
+// A diff may itself contain markdown or code fences, but inside a unified diff
+// every content line carries a leading ' ', '+' or '-', so an inner fence shows
+// up as "+```" / " ```" and never as a bare fence. Only a line consisting
+// solely of backticks (at least as many as the opener, which may be longer
+// than three) closes the block.
+func extractDiffBlock(msg string) (string, bool) {
+	lines := strings.Split(msg, "\n")
+	for i := 0; i < len(lines); i++ {
+		open := strings.TrimRight(lines[i], " \t\r")
+		if !strings.HasPrefix(open, "```") || !strings.HasSuffix(open, "diff") {
+			continue
+		}
+		fence := strings.TrimSuffix(open, "diff")
+		if strings.Trim(fence, "`") != "" || len(fence) < 3 {
+			continue
+		}
+		for j := i + 1; j < len(lines); j++ {
+			t := strings.TrimRight(lines[j], " \t\r")
+			if len(t) >= len(fence) && strings.Trim(t, "`") == "" {
+				return strings.Join(lines[i+1:j], "\n"), true
+			}
+		}
+		return "", false // opened but never closed
+	}
+	return "", false
+}

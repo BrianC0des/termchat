@@ -326,6 +326,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Pre-warm the cloud relay in background (Render free-tier cold-start mitigations)
+	if !*lanFlag && *relayFlag != "" {
+		network.PreWarmRelay(*relayFlag)
+	}
+
 	// 6. Connect to Cloud Room or Auto-Join Project Workspace
 	if *roomFlag != "" {
 		model.SwitchRoomHistory(*roomFlag)

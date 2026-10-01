@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -58,7 +59,28 @@ func (c *Client) httpClient() *http.Client {
 	if c.HTTPClient != nil {
 		return c.HTTPClient
 	}
-	return http.DefaultClient
+	// Never http.DefaultClient: it has no timeout, so a stalled connection
+	// would hang the login goroutine until the outer context expires.
+	return defaultHTTPClient
+}
+
+var defaultHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
+// maxAuthResponse bounds every response body we decode from the network.
+const maxAuthResponse = 1 << 20
+
+// maxPollWait caps the poll interval the server can ask for (slow_down).
+const maxPollWait = 60 * time.Second
+
+// validVerificationURI reports whether uri is safe to show to the user and
+// open in a browser: https, no credentials, and hosted on github.com.
+func validVerificationURI(uri string) bool {
+	u, err := url.Parse(uri)
+	if err != nil || u.Scheme != "https" || u.User != nil {
+		return false
+	}
+	h := strings.ToLower(u.Hostname())
+	return h == "github.com" || strings.HasSuffix(h, ".github.com")
 }
 
 // DeviceCodeResponse is GitHub's response from POST /login/device/code,
@@ -99,11 +121,14 @@ func (c *Client) RequestDeviceCode(ctx context.Context) (*DeviceCodeResponse, er
 	}
 
 	var out DeviceCodeResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAuthResponse)).Decode(&out); err != nil {
 		return nil, fmt.Errorf("ghauth: decode device code response: %w", err)
 	}
 	if out.DeviceCode == "" || out.UserCode == "" {
 		return nil, errors.New("ghauth: malformed device code response")
+	}
+	if !validVerificationURI(out.VerificationURI) {
+		return nil, fmt.Errorf("ghauth: refusing untrusted verification URI %q", out.VerificationURI)
 	}
 	if out.Interval <= 0 {
 		out.Interval = int(defaultPollInterval.Seconds())
@@ -178,6 +203,9 @@ func (c *Client) PollToken(ctx context.Context, deviceCode string, interval int)
 			} else {
 				wait += 5 * time.Second
 			}
+			if wait > maxPollWait {
+				wait = maxPollWait
+			}
 		}
 		// else: authorization_pending, keep polling at current interval.
 	}
@@ -209,7 +237,7 @@ func (c *Client) pollOnce(ctx context.Context, deviceCode string) (token string,
 	defer resp.Body.Close()
 
 	var out tokenResponse
-	if decErr := json.NewDecoder(resp.Body).Decode(&out); decErr != nil {
+	if decErr := json.NewDecoder(io.LimitReader(resp.Body, maxAuthResponse)).Decode(&out); decErr != nil {
 		return "", false, 0, fmt.Errorf("ghauth: decode token poll response: %w", decErr)
 	}
 
@@ -262,7 +290,7 @@ func (c *Client) FetchUser(ctx context.Context, token string) (*User, error) {
 	}
 
 	var u User
-	if err := json.NewDecoder(resp.Body).Decode(&u); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxAuthResponse)).Decode(&u); err != nil {
 		return nil, fmt.Errorf("ghauth: decode user response: %w", err)
 	}
 	return &u, nil

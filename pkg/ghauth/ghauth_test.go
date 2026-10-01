@@ -3,11 +3,13 @@ package ghauth
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -526,4 +528,93 @@ func fetchUserAgainst(c *Client, baseURL, token string) (*User, error) {
 		return nil, err
 	}
 	return &u, nil
+}
+
+func TestSaveTokenTightensLooseExistingFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX permission bits are not meaningfully enforced on windows")
+	}
+	path := withFakeConfigDir(t)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"user":"old","token":"old"}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveToken("octocat", "tok_new", nil); err != nil {
+		t.Fatalf("SaveToken: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if perm := info.Mode().Perm(); perm != 0600 {
+		t.Fatalf("permissions = %o, want 0600", perm)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(got), "tok_new") || strings.Contains(string(got), "old") {
+		t.Fatalf("file not replaced: %q %v", got, err)
+	}
+}
+
+func TestSaveTokenLeavesNoTempFiles(t *testing.T) {
+	path := withFakeConfigDir(t)
+	for i := 0; i < 3; i++ {
+		if err := SaveToken("octocat", "tok", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "hosts.json" {
+			t.Errorf("stray file left behind: %s", e.Name())
+		}
+	}
+}
+
+func TestValidVerificationURI(t *testing.T) {
+	for _, ok := range []string{"https://github.com/login/device", "https://GitHub.com/login/device"} {
+		if !validVerificationURI(ok) {
+			t.Errorf("%q rejected", ok)
+		}
+	}
+	for _, bad := range []string{
+		"", "http://github.com/login/device", "https://evil.example/login/device",
+		"https://github.com.evil.example/x", "https://user:pw@github.com/x", "file:///etc/passwd",
+		"javascript:alert(1)", "https://notgithub.com/x",
+	} {
+		if validVerificationURI(bad) {
+			t.Errorf("%q accepted", bad)
+		}
+	}
+}
+
+type cannedTransport struct{ body string }
+
+func (c cannedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: 200,
+		Header:     http.Header{"Content-Type": {"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(c.body)),
+		Request:    r,
+	}, nil
+}
+
+// Exercises the real RequestDeviceCode (not the test mirror) end to end.
+func TestRequestDeviceCodeRejectsUntrustedVerificationURI(t *testing.T) {
+	mk := func(uri string) *Client {
+		body := `{"device_code":"d","user_code":"ABCD-1234","verification_uri":"` + uri + `","expires_in":900,"interval":5}`
+		return &Client{HTTPClient: &http.Client{Transport: cannedTransport{body}}}
+	}
+	if _, err := mk("https://github.com/login/device").RequestDeviceCode(context.Background()); err != nil {
+		t.Fatalf("legit URI rejected: %v", err)
+	}
+	for _, bad := range []string{"https://evil.example/login/device", "file:///etc/passwd", "http://github.com/login/device"} {
+		if _, err := mk(bad).RequestDeviceCode(context.Background()); err == nil {
+			t.Errorf("untrusted verification URI %q accepted", bad)
+		}
+	}
 }

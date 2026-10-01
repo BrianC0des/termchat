@@ -2,20 +2,75 @@ package ghbridge
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
+
+	"termchat/pkg/ghauth"
 )
+
+// ghTimeout bounds every gh invocation so a stalled network or an
+// unexpected interactive prompt can never wedge the TUI.
+var ghTimeout = 30 * time.Second
+
+// ErrGHNotInstalled is returned when the GitHub CLI is not on PATH.
+var ErrGHNotInstalled = errors.New("GitHub CLI (`gh`) is not installed or not on PATH; see https://cli.github.com")
+
+// ghEnv builds the environment for a gh subprocess. gh honours GH_TOKEN and
+// GITHUB_TOKEN itself, and reuses its own `gh auth login` state, so nothing
+// is injected in those cases. The one credential gh cannot see is the token
+// termchat stored via its own /login device flow: that one is passed to the
+// child process through GH_TOKEN (never on the command line).
+func ghEnv() []string {
+	env := append(os.Environ(),
+		"GH_PROMPT_DISABLED=1", // never block on an interactive prompt
+		"GH_NO_UPDATE_NOTIFIER=1",
+		"NO_COLOR=1",
+	)
+	if os.Getenv("GH_TOKEN") != "" || os.Getenv("GITHUB_TOKEN") != "" {
+		return env
+	}
+	if res, err := ghauth.GetToken(); err == nil && res.Source == ghauth.SourceTermChat {
+		env = append(env, "GH_TOKEN="+res.Token)
+	}
+	return env
+}
+
+// ghCommand prepares a gh invocation bound to ctx. The process working
+// directory is inherited: termchat's /cd and /repo switch change it with
+// os.Chdir, so gh always operates on the active workspace.
+func ghCommand(ctx context.Context, args ...string) (*exec.Cmd, error) {
+	path, err := exec.LookPath("gh")
+	if err != nil {
+		return nil, ErrGHNotInstalled
+	}
+	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.Env = ghEnv()
+	return cmd, nil
+}
 
 // runGH executes a GitHub CLI command and captures stderr on failure
 func runGH(args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), ghTimeout)
+	defer cancel()
+
+	cmd, err := ghCommand(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
 	var stderr bytes.Buffer
-	cmd := exec.Command("gh", args...)
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("gh %s timed out after %s", args[0], ghTimeout)
+		}
 		errStr := strings.TrimSpace(stderr.String())
 		if errStr != "" {
 			return nil, fmt.Errorf("%s", errStr)
@@ -65,10 +120,10 @@ func FetchPR(repo string, prNum int) (*PRDetails, error) {
 	}
 
 	var raw struct {
-		Number         int    `json:"number"`
-		Title          string `json:"title"`
-		State          string `json:"state"`
-		Author         struct {
+		Number int    `json:"number"`
+		Title  string `json:"title"`
+		State  string `json:"state"`
+		Author struct {
 			Login string `json:"login"`
 		} `json:"author"`
 		HeadRefName    string `json:"headRefName"`
@@ -80,7 +135,7 @@ func FetchPR(repo string, prNum int) (*PRDetails, error) {
 		Labels         []struct {
 			Name string `json:"name"`
 		} `json:"labels"`
-		URL            string `json:"url"`
+		URL string `json:"url"`
 	}
 
 	if err := json.Unmarshal(out, &raw); err != nil {
@@ -156,9 +211,18 @@ func FetchIssue(repo string, issueNum int) (*IssueDetails, error) {
 
 // CheckoutPR switches to the branch of the given PR number
 func CheckoutPR(prNum int) (string, error) {
-	cmd := exec.Command("gh", "pr", "checkout", strconv.Itoa(prNum))
+	ctx, cancel := context.WithTimeout(context.Background(), ghTimeout)
+	defer cancel()
+
+	cmd, err := ghCommand(ctx, "pr", "checkout", strconv.Itoa(prNum))
+	if err != nil {
+		return "", err
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("gh pr checkout timed out after %s", ghTimeout)
+		}
 		return "", fmt.Errorf("gh pr checkout failed: %s", strings.TrimSpace(string(out)))
 	}
 	return strings.TrimSpace(string(out)), nil

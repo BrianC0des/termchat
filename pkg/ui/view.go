@@ -269,6 +269,19 @@ func (m *Model) View() string {
 			Render(fmt.Sprintf("» %s  %s", m.toastMsg, escHint))
 	}
 
+	var relayBanner string
+	if m.relayStatus != "" {
+		spinners := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+		spinner := spinners[m.relaySpinnerIdx%len(spinners)]
+		relayBanner = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#E0AF68")).
+			Background(BgLight).
+			Bold(true).
+			Padding(0, 1).
+			Width(m.width).
+			Render(fmt.Sprintf("%s %s", spinner, m.relayStatus))
+	}
+
 	var layout []string
 	layout = append(layout, headerBar)
 	if radarBanner != "" {
@@ -277,6 +290,9 @@ func (m *Model) View() string {
 	layout = append(layout, body)
 	if transferBar != "" {
 		layout = append(layout, transferBar)
+	}
+	if relayBanner != "" {
+		layout = append(layout, relayBanner)
 	}
 	if toastBanner != "" {
 		layout = append(layout, toastBanner)
@@ -300,7 +316,7 @@ func (m *Model) getSidebarModeLabel() string {
 	}
 }
 
-func (m *Model) renderSidebar(peers []network.PeerConnection, width int) string {
+func (m *Model) renderSidebar(peers []network.PeerInfo, width int) string {
 	var sb strings.Builder
 
 	totalCount := len(peers) + 1

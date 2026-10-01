@@ -5,7 +5,6 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
-	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"github.com/klauspost/compress/zstd"
@@ -22,16 +21,27 @@ import (
 )
 
 const (
-	AppVersion      = "v2.1.2"
-	CloudflareR2URL = "https://pub-dedfad7b41964c1db562228d4b8bde8a.r2.dev"
+	AppVersion = "v2.1.2"
 )
 
 var (
-	preFetchMu       sync.RWMutex
-	isPreFetching    bool
-	preFetchTag      string
-	preFetchProgress int
+	CloudflareR2URL        = "https://pub-dedfad7b41964c1db562228d4b8bde8a.r2.dev"
+	overrideDownloadURLs   []string
+	overrideVersionTag     string
+	currentVersionOverride string
+	execPathOverride       string
+	preFetchMu             sync.RWMutex
+	isPreFetching          bool
+	preFetchTag            string
+	preFetchProgress       int
 )
+
+func currentAppVersion() string {
+	if currentVersionOverride != "" {
+		return currentVersionOverride
+	}
+	return AppVersion
+}
 
 func GetPreFetchStatus() (bool, string, int) {
 	preFetchMu.RLock()
@@ -135,7 +145,7 @@ func extractTarGz(gzipData []byte, destFile *os.File) error {
 			return err
 		}
 		if header.Typeflag == tar.TypeReg {
-			_, err := io.Copy(destFile, tr)
+			_, err := copyCapped(destFile, tr, maxUpdateExtracted)
 			return err
 		}
 	}
@@ -155,7 +165,7 @@ func extractZip(zipData []byte, destFile *os.File) error {
 				return err
 			}
 			defer rc.Close()
-			_, err = io.Copy(destFile, rc)
+			_, err = copyCapped(destFile, rc, maxUpdateExtracted)
 			return err
 		}
 	}
@@ -217,7 +227,22 @@ func getPlatformArchiveName() string {
 
 // FetchLatestVersionTag queries CDN edge and web redirects without encountering GitHub REST API rate limits
 func FetchLatestVersionTag() (string, error) {
-	client := createOptimizedHTTPClient(false)
+	if overrideVersionTag != "" {
+		return overrideVersionTag, nil
+	}
+	tag, err := fetchLatestVersionTagRaw()
+	if err != nil {
+		return "", err
+	}
+	tag = strings.TrimSpace(tag)
+	if !isValidTag(tag) {
+		return "", fmt.Errorf("mirror returned an invalid version tag %q", tag)
+	}
+	return tag, nil
+}
+
+func fetchLatestVersionTagRaw() (string, error) {
+	client := createOptimizedHTTPClient()
 	client.Timeout = 5 * time.Second
 
 	// Tier 0: Cloudflare R2 Global Edge (Instant, Zero Rate Limits, No Cache Lag)
@@ -230,7 +255,7 @@ func FetchLatestVersionTag() (string, error) {
 			var vInfo struct {
 				Version string `json:"version"`
 			}
-			if json.NewDecoder(resp.Body).Decode(&vInfo) == nil && vInfo.Version != "" {
+			if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&vInfo) == nil && vInfo.Version != "" {
 				return vInfo.Version, nil
 			}
 		}
@@ -254,7 +279,7 @@ func FetchLatestVersionTag() (string, error) {
 				var vInfo struct {
 					Version string `json:"version"`
 				}
-				if json.NewDecoder(resp.Body).Decode(&vInfo) == nil && vInfo.Version != "" {
+				if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&vInfo) == nil && vInfo.Version != "" {
 					return vInfo.Version, nil
 				}
 			}
@@ -300,7 +325,7 @@ func FetchLatestVersionTag() (string, error) {
 			var data struct {
 				TagName string `json:"tag_name"`
 			}
-			if json.NewDecoder(apiResp.Body).Decode(&data) == nil && data.TagName != "" {
+			if json.NewDecoder(io.LimitReader(apiResp.Body, 1<<20)).Decode(&data) == nil && data.TagName != "" {
 				return data.TagName, nil
 			}
 		}
@@ -312,15 +337,7 @@ func FetchLatestVersionTag() (string, error) {
 	return AppVersion, nil
 }
 
-func getStagedBinaryPath() string {
-	return filepath.Join(os.TempDir(), "termchat-staged-binary.tmp")
-}
-
-func getStagedTagPath() string {
-	return filepath.Join(os.TempDir(), "termchat-staged-tag.txt")
-}
-
-func createOptimizedHTTPClient(insecure bool) *http.Client {
+func createOptimizedHTTPClient() *http.Client {
 	transport := &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
@@ -333,9 +350,6 @@ func createOptimizedHTTPClient(insecure bool) *http.Client {
 		TLSHandshakeTimeout: 5 * time.Second,
 		ReadBufferSize:      64 * 1024,
 		WriteBufferSize:     64 * 1024,
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: insecure,
-		},
 	}
 	return &http.Client{Transport: transport, Timeout: 0}
 }
@@ -418,7 +432,7 @@ func downloadMultiThreaded(client *http.Client, targetURL string, totalSize int6
 
 			var buf bytes.Buffer
 			dest := io.MultiWriter(&buf, pw)
-			_, err = io.Copy(dest, resp.Body)
+			_, err = copyCapped(dest, resp.Body, end-start+1)
 			if err != nil {
 				errOnce.Do(func() { downloadErr = err })
 				return
@@ -456,7 +470,7 @@ func extractTarZst(zstdData []byte, destFile *os.File) error {
 			return err
 		}
 		if header.Typeflag == tar.TypeReg {
-			_, err := io.Copy(destFile, tr)
+			_, err := copyCapped(destFile, tr, maxUpdateExtracted)
 			return err
 		}
 	}
@@ -507,18 +521,16 @@ func processAndWriteBinary(rawBytes []byte, destFile *os.File) error {
 func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 	go func() {
 		latestTag, err := FetchLatestVersionTag()
-		if err != nil || latestTag == "" || !isNewerVersion(latestTag, AppVersion) {
+		curVer := currentAppVersion()
+		if err != nil || latestTag == "" || !isNewerVersion(latestTag, curVer) {
 			return
 		}
 
-		stagedTag, _ := os.ReadFile(getStagedTagPath())
-		if strings.TrimSpace(string(stagedTag)) == latestTag {
-			if info, err := os.Stat(getStagedBinaryPath()); err == nil && info.Size() > 1000000 {
-				if onNotice != nil {
-					onNotice(fmt.Sprintf("[NET] New update %s is pre-downloaded & ready! Type `/update` to apply instantly.", latestTag))
-				}
-				return
+		if stagedUpdateReady(latestTag) {
+			if onNotice != nil {
+				onNotice(fmt.Sprintf("[NET] New update %s is pre-downloaded & ready! Type `/update` to apply instantly.", latestTag))
 			}
+			return
 		}
 
 		preFetchMu.Lock()
@@ -564,13 +576,12 @@ func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, binaryName),
 			fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s.tar.gz", latestTag, binaryName),
 		}
+		if len(overrideDownloadURLs) > 0 {
+			urls = overrideDownloadURLs
+		}
 
-		// R2 and GitHub both present valid, trusted CA certificates, so we only
-		// ever use clients that perform full TLS verification here. An
-		// InsecureSkipVerify fallback would let an on-path attacker
-		// transparently MITM the binary update download.
 		clients := []*http.Client{
-			createOptimizedHTTPClient(false),
+			createOptimizedHTTPClient(),
 			http.DefaultClient,
 		}
 		var resp *http.Response
@@ -601,25 +612,45 @@ func CheckAndPreFetchUpdateAsync(onNotice func(string)) {
 		}
 		defer resp.Body.Close()
 
-		gzData, err := io.ReadAll(resp.Body)
-		if err != nil || len(gzData) == 0 {
+		gzData, err := io.ReadAll(io.LimitReader(resp.Body, maxUpdateDownload+1))
+		if err != nil || len(gzData) == 0 || int64(len(gzData)) > maxUpdateDownload {
 			return
 		}
 
-		stagedFile, err := os.Create(getStagedBinaryPath())
+		// Stage atomically in a private per-user directory: drop any stale
+		// binary/metadata first, write to a temp file, record its SHA-256,
+		// then rename into place and write the metadata last.
+		clearStaged()
+		dir, err := stagingDir()
 		if err != nil {
 			return
 		}
-		defer stagedFile.Close()
+		stagedFile, err := os.CreateTemp(dir, "stage-*.tmp")
+		if err != nil {
+			return
+		}
+		tmpPath := stagedFile.Name()
 
 		err = processAndWriteBinary(gzData, stagedFile)
-
-		if err == nil {
-			_ = os.Chmod(getStagedBinaryPath(), 0755)
-			_ = os.WriteFile(getStagedTagPath(), []byte(latestTag), 0644)
-			if onNotice != nil {
-				onNotice(fmt.Sprintf("[NET] New update %s pre-downloaded! Type `/update` to apply instantly.", latestTag))
-			}
+		if cErr := stagedFile.Close(); err == nil {
+			err = cErr
+		}
+		if err != nil {
+			_ = os.Remove(tmpPath)
+			return
+		}
+		_ = os.Chmod(tmpPath, 0700)
+		sum, err := hashFile(tmpPath)
+		if err != nil || os.Rename(tmpPath, getStagedBinaryPath()) != nil {
+			_ = os.Remove(tmpPath)
+			return
+		}
+		if err := writeStagedMeta(latestTag, sum); err != nil {
+			clearStaged()
+			return
+		}
+		if onNotice != nil {
+			onNotice(fmt.Sprintf("[NET] New update %s pre-downloaded! Type `/update` to apply instantly.", latestTag))
 		}
 	}()
 }
@@ -685,21 +716,26 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	}
 
 	latestTag, err := FetchLatestVersionTag()
-	if err != nil || latestTag == "" || !isNewerVersion(latestTag, AppVersion) {
-		return fmt.Sprintf("[OK] You are already on the latest version of TermChat (%s)!", AppVersion), nil
+	curVer := currentAppVersion()
+	if err != nil || latestTag == "" || !isNewerVersion(latestTag, curVer) {
+		return fmt.Sprintf("[OK] You are already on the latest version of TermChat (%s)!", curVer), nil
 	}
 
 	if onProgress != nil {
-		onProgress(fmt.Sprintf("[NET] Found new version: %s (Current: %s)", latestTag, AppVersion))
+		onProgress(fmt.Sprintf("[NET] Found new version: %s (Current: %s)", latestTag, curVer))
 	}
 
-	execPath, err := os.Executable()
-	if err != nil {
-		return "", fmt.Errorf("could not determine executable path: %w", err)
-	}
-	execPath, err = filepath.EvalSymlinks(execPath)
-	if err != nil {
-		return "", fmt.Errorf("could not resolve symlinks: %w", err)
+	execPath := execPathOverride
+	if execPath == "" {
+		var err error
+		execPath, err = os.Executable()
+		if err != nil {
+			return "", fmt.Errorf("could not determine executable path: %w", err)
+		}
+		execPath, err = filepath.EvalSymlinks(execPath)
+		if err != nil {
+			return "", fmt.Errorf("could not resolve symlinks: %w", err)
+		}
 	}
 
 	// Check if background pre-download is currently in progress
@@ -720,22 +756,21 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	}
 
 	// Check if update is ALREADY pre-fetched in background
-	stagedTag, _ := os.ReadFile(getStagedTagPath())
-	if strings.TrimSpace(string(stagedTag)) == latestTag {
+	// (the staged binary is only used if it still matches the SHA-256
+	// recorded when it was staged; otherwise it is discarded and re-downloaded)
+	if stagedUpdateReady(latestTag) {
 		stagedBin := getStagedBinaryPath()
-		if info, sErr := os.Stat(stagedBin); sErr == nil && info.Size() > 1000000 {
-			if onProgress != nil {
-				onProgress("[OK] Applying pre-downloaded update instantly (0s wait)...")
-			}
-			rErr := replaceExecutableSafely(stagedBin, execPath)
-			_ = os.Remove(getStagedTagPath())
-			_ = os.Remove(stagedBin)
-			if rErr != nil {
-				return "", fmt.Errorf("failed to apply pre-downloaded update: %w", rErr)
-			}
-			return fmt.Sprintf("[OK] Instant update applied! TermChat updated to %s.\n:: Please restart termchat to run new version.", latestTag), nil
+		if onProgress != nil {
+			onProgress("[OK] Applying pre-downloaded update instantly (0s wait)...")
 		}
+		rErr := replaceExecutableSafely(stagedBin, execPath)
+		clearStaged()
+		if rErr != nil {
+			return "", fmt.Errorf("failed to apply pre-downloaded update: %w", rErr)
+		}
+		return fmt.Sprintf("[OK] Instant update applied! TermChat updated to %s.\n:: Please restart termchat to run new version.", latestTag), nil
 	}
+	clearStaged()
 
 	binaryName := getPlatformBinaryName()
 	archiveName := getPlatformArchiveName()
@@ -757,12 +792,12 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	// InsecureSkipVerify fallback would let an on-path attacker
 	// transparently MITM the delta patch download.
 	clients := []*http.Client{
-		createOptimizedHTTPClient(false),
+		createOptimizedHTTPClient(),
 		http.DefaultClient,
 	}
 
 	if onProgress != nil {
-		onProgress(fmt.Sprintf("[NET] Checking differential delta patch (%s -> %s)...", AppVersion, latestTag))
+		onProgress(fmt.Sprintf("[NET] Checking differential delta patch (%s -> %s)...", curVer, latestTag))
 	}
 
 	for _, client := range clients {
@@ -774,9 +809,9 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 			req.Header.Set("User-Agent", "TermChat-Updater/2.0")
 			dResp, dErr := client.Do(req)
 			if dErr == nil && dResp.StatusCode == http.StatusOK {
-				deltaData, readErr := io.ReadAll(dResp.Body)
+				deltaData, readErr := io.ReadAll(io.LimitReader(dResp.Body, maxDeltaDownload+1))
 				dResp.Body.Close()
-				if readErr == nil && len(deltaData) > 76 && string(deltaData[:4]) == DeltaMagic {
+				if readErr == nil && int64(len(deltaData)) <= maxDeltaDownload && len(deltaData) > 76 && string(deltaData[:4]) == DeltaMagic {
 					if onProgress != nil {
 						onProgress(fmt.Sprintf("[NET] Downloaded delta patch (%.1f KB)! Reconstructing binary...", float64(len(deltaData))/1024))
 					}
@@ -839,6 +874,9 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s", latestTag, binaryName),
 		fmt.Sprintf("https://github.com/BrianC0des/termchat/releases/download/%s/%s.tar.gz", latestTag, binaryName),
 	}
+	if len(overrideDownloadURLs) > 0 {
+		urls = overrideDownloadURLs
+	}
 	var resp *http.Response
 	var activeClient *http.Client
 	var targetURL string
@@ -900,7 +938,7 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 		onProgress: onProgress,
 	}
 
-	if totalSize > 500000 {
+	if totalSize > 500000 && totalSize <= maxUpdateDownload {
 		multiBytes, mErr := downloadMultiThreaded(activeClient, finalURL, totalSize, pw)
 		if mErr == nil && len(multiBytes) > 100000 {
 			rawBytes = multiBytes
@@ -910,7 +948,7 @@ func UpdateSelfWithProgress(onProgress func(msg string)) (string, error) {
 	if len(rawBytes) == 0 {
 		var downloadedData bytes.Buffer
 		destWriter := io.MultiWriter(&downloadedData, pw)
-		_, err = io.Copy(destWriter, resp.Body)
+		_, err = copyCapped(destWriter, resp.Body, maxUpdateDownload)
 		if err != nil {
 			return "", fmt.Errorf("error reading download stream: %w", err)
 		}

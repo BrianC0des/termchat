@@ -102,4 +102,3 @@ func TestRunGHCapturesStderr(t *testing.T) {
 		t.Errorf("expected error to mention 'unknown flag', got: %v", err)
 	}
 }
-

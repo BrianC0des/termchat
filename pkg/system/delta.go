@@ -145,7 +145,15 @@ func ApplyDelta(oldBytes, patchEnvelope []byte) ([]byte, error) {
 		return nil, fmt.Errorf("source binary mismatch (hash %x != expected %x) — base version modified", actualSourceHash[:8], expectedSourceHash[:8])
 	}
 
-	// 3. Decompress instruction stream
+	// The header is attacker-controlled (only the mirror vouches for it), so
+	// bound everything derived from it before allocating or looping.
+	if targetSize == 0 || targetSize > uint64(maxUpdateExtracted) {
+		return nil, fmt.Errorf("delta target size %d outside allowed range", targetSize)
+	}
+
+	// 3. Decompress instruction stream, bounded (decompression-bomb guard).
+	// A legitimate stream is at most the literal payload plus 9 bytes per op.
+	maxStream := int64(targetSize) + int64(targetSize)/2 + (1 << 20)
 	compressedPayload := patchEnvelope[76:]
 	dec, err := zstd.NewReader(bytes.NewReader(compressedPayload))
 	if err != nil {
@@ -153,15 +161,41 @@ func ApplyDelta(oldBytes, patchEnvelope []byte) ([]byte, error) {
 	}
 	defer dec.Close()
 
-	decompressedStream, err := io.ReadAll(dec)
+	decompressedStream, err := io.ReadAll(io.LimitReader(dec, maxStream+1))
 	if err != nil {
 		return nil, fmt.Errorf("zstd decompression failed: %w", err)
 	}
+	if int64(len(decompressedStream)) > maxStream {
+		return nil, fmt.Errorf("delta instruction stream exceeds allowed size")
+	}
 
-	// 4. Reconstruct target binary
+	// 4. Reconstruct target binary. All arithmetic is done in uint64 so
+	// offset+length cannot wrap, and output never exceeds targetSize.
 	out := make([]byte, 0, targetSize)
 	reader := bytes.NewReader(decompressedStream)
-	oldLen := len(oldBytes)
+	oldLen := uint64(len(oldBytes))
+
+	room := func(n uint64) error {
+		if uint64(len(out))+n > targetSize {
+			return fmt.Errorf("delta output exceeds declared target size %d", targetSize)
+		}
+		return nil
+	}
+	readRange := func(name string) (off, length uint32, err error) {
+		if err = binary.Read(reader, binary.LittleEndian, &off); err != nil {
+			return 0, 0, fmt.Errorf("corrupted %s offset: %w", name, err)
+		}
+		if err = binary.Read(reader, binary.LittleEndian, &length); err != nil {
+			return 0, 0, fmt.Errorf("corrupted %s length: %w", name, err)
+		}
+		if uint64(off)+uint64(length) > oldLen {
+			return 0, 0, fmt.Errorf("%s out of bounds: offset=%d len=%d oldLen=%d", name, off, length, oldLen)
+		}
+		if err = room(uint64(length)); err != nil {
+			return 0, 0, err
+		}
+		return off, length, nil
+	}
 
 	for reader.Len() > 0 {
 		op, err := reader.ReadByte()
@@ -171,46 +205,41 @@ func ApplyDelta(oldBytes, patchEnvelope []byte) ([]byte, error) {
 
 		switch op {
 		case opCopy:
-			var oldOffset, length uint32
-			if err := binary.Read(reader, binary.LittleEndian, &oldOffset); err != nil {
-				return nil, fmt.Errorf("corrupted opCopy offset: %w", err)
+			off, length, err := readRange("opCopy")
+			if err != nil {
+				return nil, err
 			}
-			if err := binary.Read(reader, binary.LittleEndian, &length); err != nil {
-				return nil, fmt.Errorf("corrupted opCopy length: %w", err)
-			}
-			if int(oldOffset+length) > oldLen {
-				return nil, fmt.Errorf("opCopy out of bounds: offset=%d len=%d oldLen=%d", oldOffset, length, oldLen)
-			}
-			out = append(out, oldBytes[oldOffset:oldOffset+length]...)
+			out = append(out, oldBytes[off:uint64(off)+uint64(length)]...)
 
 		case opInsert:
 			var length uint32
 			if err := binary.Read(reader, binary.LittleEndian, &length); err != nil {
 				return nil, fmt.Errorf("corrupted opInsert length: %w", err)
 			}
-			buf := make([]byte, length)
-			if _, err := io.ReadFull(reader, buf); err != nil {
-				return nil, fmt.Errorf("corrupted opInsert data: %w", err)
+			if uint64(length) > uint64(reader.Len()) {
+				return nil, fmt.Errorf("corrupted opInsert data: length %d exceeds remaining %d", length, reader.Len())
 			}
-			out = append(out, buf...)
+			if err := room(uint64(length)); err != nil {
+				return nil, err
+			}
+			start := len(decompressedStream) - reader.Len()
+			out = append(out, decompressedStream[start:start+int(length)]...)
+			_, _ = reader.Seek(int64(length), io.SeekCurrent)
 
 		case opDiff:
-			var oldOffset, length uint32
-			if err := binary.Read(reader, binary.LittleEndian, &oldOffset); err != nil {
-				return nil, fmt.Errorf("corrupted opDiff offset: %w", err)
+			off, length, err := readRange("opDiff")
+			if err != nil {
+				return nil, err
 			}
-			if err := binary.Read(reader, binary.LittleEndian, &length); err != nil {
-				return nil, fmt.Errorf("corrupted opDiff length: %w", err)
-			}
-			if int(oldOffset+length) > oldLen {
-				return nil, fmt.Errorf("opDiff out of bounds: offset=%d len=%d oldLen=%d", oldOffset, length, oldLen)
+			if uint64(length) > uint64(reader.Len()) {
+				return nil, fmt.Errorf("corrupted opDiff data: length %d exceeds remaining %d", length, reader.Len())
 			}
 			diffBuf := make([]byte, length)
 			if _, err := io.ReadFull(reader, diffBuf); err != nil {
 				return nil, fmt.Errorf("corrupted opDiff data: %w", err)
 			}
 			for i := uint32(0); i < length; i++ {
-				out = append(out, oldBytes[oldOffset+i]+diffBuf[i])
+				out = append(out, oldBytes[off+i]+diffBuf[i])
 			}
 
 		default:

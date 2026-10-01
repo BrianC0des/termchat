@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"termchat/pkg/system"
@@ -39,6 +40,14 @@ type PeerConnection struct {
 	Writer    *bufio.Writer
 	writeMu   sync.Mutex
 	Connected time.Time
+	pending   int32 // 1 while this inbound conn holds a pending-connection slot
+}
+
+// releasePending frees the pending-connection slot held by p, exactly once.
+func releasePending(p *PeerConnection) {
+	if atomic.CompareAndSwapInt32(&p.pending, 1, 0) {
+		atomic.AddInt64(&pendingConns, -1)
+	}
 }
 
 type FileTransferProgress struct {
@@ -53,17 +62,18 @@ type FileTransferProgress struct {
 }
 
 type NetworkEvents struct {
-	OnMessage      func(senderID, senderName, text string, ts time.Time, replyNum int, replySender, replyText string)
-	OnPeerJoin     func(id, name, addr string)
-	OnPeerLeave    func(id, name string)
-	OnSystemMsg    func(text string)
-	OnFileProgress func(p FileTransferProgress)
-	OnFileReceived func(fileName, savedPath string, size int64, senderName string)
-	OnStatus       func(senderName, statusText string)
-	OnTopic        func(senderName, topicText string)
-	OnPin          func(senderName, pinText string)
+	OnMessage       func(senderID, senderName, text string, ts time.Time, replyNum int, replySender, replyText string)
+	OnPeerJoin      func(id, name, addr string)
+	OnPeerLeave     func(id, name string)
+	OnSystemMsg     func(text string)
+	OnFileProgress  func(p FileTransferProgress)
+	OnFileReceived  func(fileName, savedPath string, size int64, senderName string)
+	OnStatus        func(senderName, statusText string)
+	OnTopic         func(senderName, topicText string)
+	OnPin           func(senderName, pinText string)
 	OnRoomDestroyed func(senderName string)
 	OnConflictRadar func(senderName, branch string, dirtyFiles []string)
+	OnRelayStatus   func(status string, connected bool)
 }
 
 type incomingFileState struct {
@@ -86,14 +96,16 @@ type Manager struct {
 	RelayURL      string
 	Identity      *system.Identity
 
-	listener    net.Listener
-	discovery   *DiscoveryService
-	peers       map[string]*PeerConnection
-	peersMu     sync.RWMutex
-	events      NetworkEvents
+	listener  net.Listener
+	discovery *DiscoveryService
+	peers     map[string]*PeerConnection
+	peersMu   sync.RWMutex
+	events    NetworkEvents
 
-	relayConn   *websocket.Conn
-	relayMu     sync.Mutex
+	relayConn  *websocket.Conn
+	relayMu    sync.Mutex
+	relayGen   uint64
+	relayGenMu sync.Mutex
 
 	cloudPeers   map[string]*PeerConnection
 	cloudPeersMu sync.RWMutex
@@ -238,9 +250,21 @@ func (m *Manager) acceptLoop() {
 
 		conn, err := m.listener.Accept()
 		if err != nil {
+			select {
+			case <-m.ctx.Done():
+				return
+			default:
+			}
+			// Avoid a hot loop on persistent errors (e.g. EMFILE).
+			time.Sleep(50 * time.Millisecond)
 			continue
 		}
 
+		if atomic.AddInt64(&pendingConns, 1) > maxPendingConns {
+			atomic.AddInt64(&pendingConns, -1)
+			_ = conn.Close()
+			continue
+		}
 		go m.handleIncomingConnection(conn)
 	}
 }
@@ -318,6 +342,7 @@ func (m *Manager) handleIncomingConnection(conn net.Conn) {
 		Conn:      conn,
 		Writer:    bufio.NewWriterSize(conn, 64*1024),
 		Connected: time.Now(),
+		pending:   1, // slot was reserved in acceptLoop
 	}
 
 	// Send local handshake
@@ -329,6 +354,7 @@ func (m *Manager) handleIncomingConnection(conn net.Conn) {
 	}
 	if err := m.sendToPeer(peerConn, handshake); err != nil {
 		_ = conn.Close()
+		releasePending(peerConn)
 		return
 	}
 
@@ -340,6 +366,20 @@ func (m *Manager) handleIncomingConnection(conn net.Conn) {
 // without ever sending a newline, causing bufio.Reader.ReadBytes to buffer
 // an unbounded amount of data in memory (a memory-exhaustion DoS).
 const maxPacketSize = 10 * 1024 * 1024 // 10 MB
+
+// Limits for connections that have not yet identified themselves with a
+// handshake. Anyone on the LAN can open a TCP connection, so until a peer
+// sends a valid handshake it gets a tiny packet budget, a short deadline,
+// and a share of a small global pool of "pending" slots.
+const (
+	maxPreHandshakePacket = 64 * 1024
+	maxPendingConns       = 64
+)
+
+// handshakeTimeout is a variable so tests can shorten it.
+var handshakeTimeout = 10 * time.Second
+
+var pendingConns int64
 
 // readBoundedLine reads a single newline-delimited line from reader,
 // aborting with an error if more than maxSize bytes are consumed before a
@@ -364,9 +404,51 @@ func readBoundedLine(reader *bufio.Reader, maxSize int) ([]byte, error) {
 	}
 }
 
+// Limits on identified LAN peers.
+const (
+	maxPeers        = 256
+	maxPeersPerHost = 8
+)
+
+func hostOf(addr string) string {
+	if h, _, err := net.SplitHostPort(addr); err == nil {
+		return h
+	}
+	return addr
+}
+
+// admitPeerLocked decides whether p may register under id. Caller holds
+// m.peersMu. The handshake carries no authentication, so any LAN host can
+// claim any ID; without these checks it could evict a real peer (the old
+// connection is closed on re-registration) or fill the table. This is
+// damage limiting, not authentication:
+//   - an ID that is already connected can only be re-registered from the
+//     same host (a genuine reconnect), never taken over from another host;
+//   - total peers and peers per host are capped.
+func (m *Manager) admitPeerLocked(p *PeerConnection, id string) bool {
+	host := hostOf(p.RemoteIP)
+	if old, exists := m.peers[id]; exists && old != p {
+		return hostOf(old.RemoteIP) == host
+	}
+	if len(m.peers) >= maxPeers {
+		return false
+	}
+	perHost := 0
+	for _, other := range m.peers {
+		if other != p && hostOf(other.RemoteIP) == host {
+			perHost++
+		}
+	}
+	return perHost < maxPeersPerHost
+}
+
 func (m *Manager) readLoop(p *PeerConnection) {
 	reader := bufio.NewReader(p.Conn)
+	identified := false
+	// Until the peer has handshaken it must finish within handshakeTimeout.
+	_ = p.Conn.SetReadDeadline(time.Now().Add(handshakeTimeout))
 	defer func() {
+		releasePending(p)
 		_ = p.Conn.Close()
 		wasActive := false
 		m.peersMu.Lock()
@@ -389,7 +471,11 @@ func (m *Manager) readLoop(p *PeerConnection) {
 		default:
 		}
 
-		line, err := readBoundedLine(reader, maxPacketSize)
+		limit := maxPacketSize
+		if !identified {
+			limit = maxPreHandshakePacket
+		}
+		line, err := readBoundedLine(reader, limit)
 		if err != nil {
 			return
 		}
@@ -400,6 +486,12 @@ func (m *Manager) readLoop(p *PeerConnection) {
 		}
 
 		m.handlePacket(p, packet)
+
+		if !identified && p.ID != "" {
+			identified = true
+			_ = p.Conn.SetReadDeadline(time.Time{})
+			releasePending(p)
+		}
 	}
 }
 
@@ -466,15 +558,23 @@ func (m *Manager) handlePacket(p *PeerConnection, pkt *Packet) {
 			return
 		}
 
-		p.ID = pkt.SenderID
-		p.Name = pkt.Sender
-
 		if m.RoomName != "" {
+			p.ID = pkt.SenderID
+			p.Name = pkt.Sender
 			m.cloudPeersMu.Lock()
 			m.cloudPeers[p.ID] = p
 			m.cloudPeersMu.Unlock()
 		} else {
 			m.peersMu.Lock()
+			if !m.admitPeerLocked(p, pkt.SenderID) {
+				m.peersMu.Unlock()
+				if p.Conn != nil {
+					_ = p.Conn.Close()
+				}
+				return
+			}
+			p.ID = pkt.SenderID
+			p.Name = pkt.Sender
 			if old, exists := m.peers[p.ID]; exists && old != p {
 				_ = old.Conn.Close()
 			}
@@ -684,6 +784,37 @@ func (m *Manager) handleFileCancel(p *PeerConnection, pkt *Packet) {
 	}
 }
 
+// PreWarmRelay sends a lightweight non-blocking HTTP GET to wake up sleeping cloud relays (e.g. Render free-tier).
+func PreWarmRelay(relayURL string) {
+	if relayURL == "" {
+		return
+	}
+	go func() {
+		httpURL := relayURL
+		if strings.HasPrefix(httpURL, "wss://") {
+			httpURL = "https://" + strings.TrimPrefix(httpURL, "wss://")
+		} else if strings.HasPrefix(httpURL, "ws://") {
+			httpURL = "http://" + strings.TrimPrefix(httpURL, "ws://")
+		} else if !strings.HasPrefix(httpURL, "http://") && !strings.HasPrefix(httpURL, "https://") {
+			httpURL = "https://" + httpURL
+		}
+
+		parsed, err := url.Parse(httpURL)
+		if err != nil {
+			return
+		}
+		healthURL := fmt.Sprintf("%s://%s/health", parsed.Scheme, parsed.Host)
+
+		client := &http.Client{
+			Timeout: 5 * time.Second,
+		}
+		resp, err := client.Get(healthURL)
+		if err == nil {
+			_ = resp.Body.Close()
+		}
+	}()
+}
+
 func (m *Manager) ConnectRelay(relayURL, roomName string) {
 	if relayURL == "" {
 		return
@@ -691,12 +822,49 @@ func (m *Manager) ConnectRelay(relayURL, roomName string) {
 	m.RelayURL = relayURL
 	m.RoomName = roomName
 
+	m.relayGenMu.Lock()
+	m.relayGen++
+	myGen := m.relayGen
+	m.relayGenMu.Unlock()
+
+	// Terminate any previous relay connection immediately
+	m.relayMu.Lock()
+	if m.relayConn != nil {
+		_ = m.relayConn.Close()
+		m.relayConn = nil
+	}
+	m.relayMu.Unlock()
+
+	// Pre-warm the relay in case of idle spin-down
+	PreWarmRelay(relayURL)
+
 	go func() {
+		attempt := 0
+		startTime := time.Now()
+
 		for {
 			select {
 			case <-m.ctx.Done():
 				return
 			default:
+			}
+
+			m.relayGenMu.Lock()
+			if myGen != m.relayGen {
+				m.relayGenMu.Unlock()
+				return
+			}
+			m.relayGenMu.Unlock()
+
+			if attempt == 0 {
+				if m.events.OnRelayStatus != nil {
+					m.events.OnRelayStatus(fmt.Sprintf("Connecting to cloud room #%s...", roomName), false)
+				}
+			} else {
+				elapsed := int(time.Since(startTime).Seconds())
+				if m.events.OnRelayStatus != nil {
+					m.events.OnRelayStatus(fmt.Sprintf("Waking up relay (Render cold start) • %ds elapsed [attempt %d]...", elapsed, attempt+1), false)
+				}
 			}
 
 			u := fmt.Sprintf("%s?room=%s&name=%s&id=%s", relayURL, roomName, m.LocalName, m.LocalID)
@@ -725,13 +893,36 @@ func (m *Manager) ConnectRelay(relayURL, roomName string) {
 
 			conn, _, err := dialer.Dial(u, nil)
 			if err != nil {
-				time.Sleep(1 * time.Second)
+				attempt++
+				backoff := time.Duration(attempt) * 1500 * time.Millisecond
+				if backoff > 6*time.Second {
+					backoff = 6 * time.Second
+				}
+				select {
+				case <-m.ctx.Done():
+					return
+				case <-time.After(backoff):
+				}
 				continue
 			}
+
+			m.relayGenMu.Lock()
+			if myGen != m.relayGen {
+				m.relayGenMu.Unlock()
+				_ = conn.Close()
+				return
+			}
+			m.relayGenMu.Unlock()
 
 			m.relayMu.Lock()
 			m.relayConn = conn
 			m.relayMu.Unlock()
+
+			attempt = 0
+
+			if m.events.OnRelayStatus != nil {
+				m.events.OnRelayStatus("", true)
+			}
 
 			if m.events.OnSystemMsg != nil {
 				m.events.OnSystemMsg(fmt.Sprintf("[ROOM] Connected to Cloud Room #%s (24/7 Global)", roomName))
@@ -843,12 +1034,33 @@ func (m *Manager) ConnectRelay(relayURL, roomName string) {
 			m.cloudPeers = make(map[string]*PeerConnection)
 			m.cloudPeersMu.Unlock()
 
-			time.Sleep(1 * time.Second)
+			m.relayGenMu.Lock()
+			if myGen != m.relayGen {
+				m.relayGenMu.Unlock()
+				return
+			}
+			m.relayGenMu.Unlock()
+
+			if m.events.OnRelayStatus != nil {
+				m.events.OnRelayStatus("Connection lost. Reconnecting to cloud relay...", false)
+			}
+
+			attempt = 1
+			startTime = time.Now()
+			select {
+			case <-m.ctx.Done():
+				return
+			case <-time.After(1 * time.Second):
+			}
 		}
 	}()
 }
 
 func (m *Manager) LeaveRoom() {
+	m.relayGenMu.Lock()
+	m.relayGen++
+	m.relayGenMu.Unlock()
+
 	m.relayMu.Lock()
 	if m.relayConn != nil {
 		_ = m.relayConn.Close()
@@ -860,6 +1072,10 @@ func (m *Manager) LeaveRoom() {
 	m.cloudPeersMu.Lock()
 	m.cloudPeers = make(map[string]*PeerConnection)
 	m.cloudPeersMu.Unlock()
+
+	if m.events.OnRelayStatus != nil {
+		m.events.OnRelayStatus("", false)
+	}
 }
 
 func (m *Manager) SendPacket(p *Packet) error {
@@ -1349,12 +1565,12 @@ func (m *Manager) SendFileWithExpiry(filePath, expiry string) error {
 		}
 
 		donePkt := &Packet{
-			Type:      MsgTypeFileDone,
-			SenderID:  m.LocalID,
-			Sender:    m.LocalName,
-			FileID:    fileID,
-			FileName:  fileName,
-			FileSize:  fileSize,
+			Type:     MsgTypeFileDone,
+			SenderID: m.LocalID,
+			Sender:   m.LocalName,
+			FileID:   fileID,
+			FileName: fileName,
+			FileSize: fileSize,
 		}
 		for _, peer := range peersList {
 			_ = m.sendToPeer(peer, donePkt)
@@ -1395,13 +1611,27 @@ func (m *Manager) sendToPeer(peer *PeerConnection, p *Packet) error {
 	return peer.Writer.Flush()
 }
 
-func (m *Manager) GetPeers() []PeerConnection {
+// PeerInfo is a read-only snapshot of a connected peer. GetPeers returns
+// snapshots rather than copies of PeerConnection, which holds a mutex and
+// atomic state that must never be copied.
+type PeerInfo struct {
+	ID        string
+	Name      string
+	RemoteIP  string
+	Connected time.Time
+}
+
+func snapshotPeer(p *PeerConnection) PeerInfo {
+	return PeerInfo{ID: p.ID, Name: p.Name, RemoteIP: p.RemoteIP, Connected: p.Connected}
+}
+
+func (m *Manager) GetPeers() []PeerInfo {
 	if m.RoomName != "" {
 		// In Cloud Room mode: show only members connected to this room
 		m.cloudPeersMu.RLock()
-		list := make([]PeerConnection, 0, len(m.cloudPeers))
+		list := make([]PeerInfo, 0, len(m.cloudPeers))
 		for _, p := range m.cloudPeers {
-			list = append(list, *p)
+			list = append(list, snapshotPeer(p))
 		}
 		m.cloudPeersMu.RUnlock()
 		return list
@@ -1409,9 +1639,9 @@ func (m *Manager) GetPeers() []PeerConnection {
 
 	// In Offline LAN mode: show only local LAN peers
 	m.peersMu.RLock()
-	list := make([]PeerConnection, 0, len(m.peers))
+	list := make([]PeerInfo, 0, len(m.peers))
 	for _, p := range m.peers {
-		list = append(list, *p)
+		list = append(list, snapshotPeer(p))
 	}
 	m.peersMu.RUnlock()
 	return list

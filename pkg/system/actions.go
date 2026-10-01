@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	neturl "net/url"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -97,6 +98,9 @@ func TriggerRing() error {
 
 // OpenURL opens a URL in the default browser across Linux, macOS, and Windows
 func OpenURL(url string) error {
+	if err := validateOpenURL(url); err != nil {
+		return err
+	}
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
@@ -138,4 +142,24 @@ func MediaControl(action string) (string, error) {
 		return fmt.Sprintf("[AUDIO] Termux Media: %s", action), nil
 	}
 	return "", fmt.Errorf("media control (playerctl) not found on this system")
+}
+
+// validateOpenURL restricts what may be handed to the OS URL opener. The
+// argument often originates from chat text or remote responses; without this,
+// file://, custom-scheme handlers or an option-like string ("-x...") could
+// launch something other than a web page.
+func validateOpenURL(raw string) error {
+	if raw == "" || len(raw) > 4096 {
+		return fmt.Errorf("refusing to open URL: empty or too long")
+	}
+	for _, r := range raw {
+		if r < 0x20 || r == 0x7f {
+			return fmt.Errorf("refusing to open URL: control character")
+		}
+	}
+	u, err := neturl.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("refusing to open URL: only http(s) links are allowed")
+	}
+	return nil
 }

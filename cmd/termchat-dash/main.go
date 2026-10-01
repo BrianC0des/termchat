@@ -112,7 +112,7 @@ type model struct {
 	mu             sync.Mutex
 }
 
-func initialModel() model {
+func initialModel() *model {
 	defaultPlatforms := []platformStatus{
 		{Name: "Linux PC (x86_64)", Asset: "termchat-linux-amd64.tar.zst", Status: "BUILDING", SizeMB: 0},
 		{Name: "Windows (64-bit .exe)", Asset: "termchat-windows.zip", Status: "BUILDING", SizeMB: 0},
@@ -120,7 +120,7 @@ func initialModel() model {
 		{Name: "macOS (Apple Silicon)", Asset: "termchat-mac-apple-silicon.tar.zst", Status: "BUILDING", SizeMB: 0},
 	}
 
-	return model{
+	return &model{
 		relayURL:    "wss://termchat-o51d.onrender.com/ws",
 		latestTag:   "v1.9.8",
 		commitHash:  "main",
@@ -135,7 +135,7 @@ func initialModel() model {
 	}
 }
 
-func (m model) Init() tea.Cmd {
+func (m *model) Init() tea.Cmd {
 	return tea.Batch(
 		tickCmd(),
 		fetchReleaseDataCmd(),
@@ -283,7 +283,7 @@ func fetchMirrorPingCmd(relayURL string) tea.Cmd {
 	}
 }
 
-func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -353,7 +353,7 @@ func formatPing(ms int64) string {
 	return lipgloss.NewStyle().Foreground(lipgloss.Color("#E0AF68")).Bold(true).Render(fmt.Sprintf("%3d ms [SLOW]", ms))
 }
 
-func (m model) View() string {
+func (m *model) View() string {
 	if m.width == 0 {
 		return "Initializing Dashboard..."
 	}

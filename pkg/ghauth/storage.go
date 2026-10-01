@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -205,15 +206,38 @@ func SaveToken(user, token string, scopes []string) error {
 		return fmt.Errorf("ghauth: marshal credentials: %w", err)
 	}
 
-	// Write with 0600 from the start (WriteFile applies the mode subject
-	// to umask on creation) and then explicitly Chmod to guarantee 0600
-	// even if the file already existed with looser permissions or the
-	// umask loosened the initial mode.
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	// Write atomically: create a temp file in the same directory (os.CreateTemp
+	// always uses mode 0600, so the token is never readable by others, even
+	// if hosts.json previously had looser permissions), fsync it, then rename
+	// over hosts.json. A crash can't leave a truncated credentials file.
+	tmp, err := os.CreateTemp(filepath.Dir(path), "hosts-*.tmp")
+	if err != nil {
+		return fmt.Errorf("ghauth: create temp credentials file: %w", err)
+	}
+	tmpName := tmp.Name()
+	cleanup := func() { _ = os.Remove(tmpName) }
+	if err := tmp.Chmod(0600); err != nil && runtime.GOOS != "windows" {
+		tmp.Close()
+		cleanup()
+		return fmt.Errorf("ghauth: chmod credentials file: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		cleanup()
 		return fmt.Errorf("ghauth: write hosts.json: %w", err)
 	}
-	if err := os.Chmod(path, 0600); err != nil {
-		return fmt.Errorf("ghauth: chmod hosts.json: %w", err)
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		cleanup()
+		return fmt.Errorf("ghauth: sync hosts.json: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("ghauth: close hosts.json: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		cleanup()
+		return fmt.Errorf("ghauth: replace hosts.json: %w", err)
 	}
 	return nil
 }

@@ -17,7 +17,7 @@ func stripANSI(s string) string {
 func TestFormatChatMessage_SQLCodeBlock(t *testing.T) {
 	raw := "```sql\nSELECT actor_id, first_name, last_name\nFROM sakila.actor\nWHERE last_name LIKE 'G%'\nORDER BY first_name ASC\nLIMIT 5;\n```"
 	res := stripANSI(FormatChatMessage(raw, 80, "#1 [alice]:", "   ", "bob"))
-	
+
 	if !strings.Contains(res, "SELECT") || !strings.Contains(res, "LIMIT 5") {
 		t.Fatalf("Expected SQL content to be formatted properly, got: %s", res)
 	}
@@ -121,5 +121,3 @@ func TestResolveEditor_WithNonExistentBinary(t *testing.T) {
 		t.Errorf("resolveEditor returned empty binary")
 	}
 }
-
-
