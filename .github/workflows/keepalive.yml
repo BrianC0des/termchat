@@ -1,0 +1,24 @@
+name: Keep Relay Awake (7am - 10pm)
+
+on:
+  schedule:
+    # Pings every 10 minutes from 7:00 AM to 10:00 PM (UTC+8 / Philippine Time)
+    # 07:00 - 22:50 UTC+8 = 23:00 - 14:50 UTC
+    - cron: '*/10 0-14,23 * * *'
+  workflow_dispatch:
+
+jobs:
+  keep-alive:
+    name: Ping Relay Health
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Relay Health
+        run: |
+          echo "Pinging TermChat cloud relay to keep it warm..."
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "https://termchat-o51d.onrender.com/health" || true)
+          echo "Response code: $HTTP_CODE"
+          if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "404" ] || [ "$HTTP_CODE" = "426" ]; then
+            echo "Relay host is awake and responding!"
+          else
+            echo "Relay returned: $HTTP_CODE (or waking up)"
+          fi
