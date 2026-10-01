@@ -586,6 +586,11 @@ func main() {
 
 	server := NewServer()
 
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"ok","time":"` + time.Now().Format(time.RFC3339) + `"}`))
+	})
 	http.HandleFunc("/ws", server.handleWS)
 	http.HandleFunc("/api/upload", server.handleUpload)
 	http.HandleFunc("/files/", server.handleDownload)
