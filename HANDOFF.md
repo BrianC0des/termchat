@@ -33,8 +33,10 @@ Pre-existing noise, not yours to fix in the same commit: `go vet` "copies lock" 
 2. Token precedence in ghauth.GetToken: env > gh CLI > termchat /login store. A /login token can be silently ignored. Decide if intended.
 
 ## OPEN, ready to do (suggested order)
-3. pkg/network/protocol.go signing and handshake authentication: unreviewed. The handshake has no auth, so ID spoofing from the SAME host is still possible; the takeover guard only blocks other hosts.
-4. Windows path checks (NTFS/8.3 names, drive letters): only tested on Linux.
+3. Issue #24: Add Nerd Font icons across file picker, shared files, and badges (replace `[DIR]`, `[file]`, `[go]` tags and emojis with clean Nerd Font glyphs).
+4. Issue #25: Fix sidebar hide/unhide toggle (F3 / Ctrl+B / `/sidebar toggle` reliability, width check <70 threshold, and full viewport reflow in Zen mode).
+5. pkg/network/protocol.go signing and handshake authentication: unreviewed. The handshake has no auth, so ID spoofing from the SAME host is still possible; the takeover guard only blocks other hosts.
+6. Windows path checks (NTFS/8.3 names, drive letters): only tested on Linux.
 
 ## Housekeeping
 - Commit in separate commits: gitcollab, ghbridge, updater+delta, ghauth, network, ui radar. Do the gofmt -w drift in its own commit.
