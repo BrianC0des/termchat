@@ -19,7 +19,7 @@ Write-Host ""
 
 # 1. Fetch Latest Release Tag
 Write-Host "Fetching latest release version..." -ForegroundColor Yellow
-$Tag = "v2.1.2"
+$Tag = "v2.2.0"
 $R2Base = "https://pub-dedfad7b41964c1db562228d4b8bde8a.r2.dev"
 try {
     $VersionInfo = Invoke-RestMethod -Uri "$R2Base/version.json" -Headers @{"User-Agent"="TermChat-Installer"} -TimeoutSec 4

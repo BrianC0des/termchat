@@ -135,7 +135,7 @@ if [ -z "${TAG}" ] && command -v curl >/dev/null 2>&1; then
 fi
 
 if [ -z "${TAG}" ] || [ "${TAG}" = "null" ] || [ "${TAG}" = "https://github.com/${REPO}/releases" ]; then
-    TAG="v2.1.2"
+    TAG="v2.2.0"
 fi
 echo -e "${GREEN}Using release version: ${TAG}${RESET}"
 
